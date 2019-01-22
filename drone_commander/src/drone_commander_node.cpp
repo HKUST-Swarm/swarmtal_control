@@ -1,5 +1,7 @@
-#define USE_DJI_SDK
-// #define USE_PX4
+#define PX4 0 
+#define DJI_SDK 1
+#define FCHardware DJI_SDK
+// #define FCHardware PX4
 
 #include <ros/ros.h>
 #include <swarmtal_msgs/drone_pos_ctrl_cmd.h>
@@ -10,7 +12,7 @@
 #include <std_msgs/UInt8.h>
 #include <math.h>
 
-#ifdef USE_DJI_SDK
+#if FCHardware == DJI_SDK
 #include <dji_sdk/ControlDevice.h>
 #include <dji_sdk/SDKControlAuthority.h>
 #include <dji_sdk/DroneArmControl.h>
