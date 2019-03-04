@@ -109,9 +109,17 @@ inline Eigen::Vector3d lowpass_filter(Eigen::Vector3d input, double fc, Eigen::V
 	return outputlast + (alpha* (input - outputlast));
 }
 
+/*
 double constrainAngle(double x){
     x = fmod(x + 180,360);
-    if (x < 0)
-        x += 360;
+    // if (x < 0)
+        // x += 360;
     return x - 180;
+}*/
+
+double constrainAngle(double x){
+    x = fmod(x + M_PI, 2*M_PI);
+    // if (x < 0)
+        // x += 360;
+    return x - M_PI;
 }

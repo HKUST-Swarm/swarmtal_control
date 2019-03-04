@@ -108,6 +108,8 @@ class DroneCommander {
 
     bool yaw_sp_inited = false;
 
+    bool rc_fail_detection = true;
+
 public:
     DroneCommander(ros::NodeHandle & _nh):
         nh(_nh) {
@@ -139,6 +141,13 @@ public:
         
         loop_timer = nh.createTimer(ros::Duration(LOOP_DURATION), &DroneCommander::loop, this);
 
+        nh.param<bool>("rc_fail_detection", rc_fail_detection, true);
+
+        if (rc_fail_detection) {
+            ROS_INFO("Will detect RC fail");
+        } else {
+            ROS_INFO("Will NOT detect RC fail");
+        }
     }
 
     void init_states() {
@@ -391,7 +400,7 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     Eigen::Quaterniond quat(pose.orientation.w, 
         pose.orientation.x, pose.orientation.y, pose.orientation.z);
     Eigen::Vector3d rpy = quat2eulers(quat);
-    yaw_vo = rpy.z();
+    yaw_vo = - rpy.z();
 }
 
 
@@ -437,7 +446,7 @@ void DroneCommander::fc_attitude_callback(const geometry_msgs::QuaternionStamped
         quat.x, quat.y, quat.z);
     Eigen::Vector3d rpy = quat2eulers(q);
     // ROS_INFO("Fc attitude %3.2f %3.2f %3.2f", rpy.x()*57.3, rpy.y()*57.3, rpy.z()*57.3);
-    yaw_fc = rpy.z();
+    yaw_fc = - rpy.z();
 }
 
 void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, double z, bool z_use_vel, bool yaw_use_rate) {
@@ -697,8 +706,10 @@ void DroneCommander::process_rc_input () {
     switch (state.commander_ctrl_mode) {
         case DCMD::CTRL_MODE_POSVEL: {
             ctrl_cmd->yaw_sp = ctrl_cmd->yaw_sp + r * RC_MAX_YAW_RATE * LOOP_DURATION;
-            ctrl_cmd->vel_sp.x = x * RC_MAX_TILT_VEL;
-            ctrl_cmd->vel_sp.y = y * RC_MAX_TILT_VEL;
+            double vxd = x * RC_MAX_TILT_VEL;
+            double vyd = y * RC_MAX_TILT_VEL;
+            ctrl_cmd->vel_sp.x = vxd * cos(yaw_vo) + vyd*sin(yaw_vo);
+            ctrl_cmd->vel_sp.y = -vxd * sin(yaw_vo) + vyd*cos(yaw_vo);
             ctrl_cmd->vel_sp.z = z * RC_MAX_Z_VEL;
             ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_VEL_MODE;
 
@@ -1017,6 +1028,10 @@ bool DroneCommander::is_odom_valid(const nav_msgs::Odometry & _odom) {
 bool DroneCommander::is_rc_valid(const sensor_msgs::Joy & _rc) {
     //TODO: Test rc vaild function,
     // This only works for SBUS!!!!
+
+    if (!rc_fail_detection) {
+        return true;
+    }
     if (
         _rc.axes[0] == 0 && 
         _rc.axes[1] == 0 && 

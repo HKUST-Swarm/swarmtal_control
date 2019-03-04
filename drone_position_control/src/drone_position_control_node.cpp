@@ -48,7 +48,7 @@ class DronePosControl {
     std::string log_path;
 
     double yaw_offset = 0;
-
+    double yaw_odom = 0;
     double yaw_fc = 0;
 
     ros::Time last_cmd_ts, start_time;
@@ -245,7 +245,11 @@ public:
         Eigen::Quaterniond q(quat.w, 
             quat.x, quat.y, quat.z);
         Eigen::Vector3d rpy = quat2eulers(q);
-        yaw_fc = rpy.z();
+
+        //Original rpy is FLU, we need NED rpy
+        yaw_fc = -rpy.z();
+
+        // ROS_INFO("Yaw FC is %3.2f", yaw_fc);
     }
 
     void OnVisualOdometry(const nav_msgs::Odometry & odom) {
@@ -272,7 +276,7 @@ public:
         set_drone_global_pos_vel(pos, vel);
 
         odom_att_rpy = quat2eulers(quat);
-        double yaw_odom = odom_att_rpy.z();
+        yaw_odom = -odom_att_rpy.z(); //Odom is also FLU, but we want NED RPY
         yaw_offset = constrainAngle(yaw_fc - yaw_odom);
     }
 
@@ -293,7 +297,22 @@ public:
         // atti_out.roll_sp = 0.0;
         // atti_out.pitch_sp = 1.0;
         // atti_out.yaw_sp = 0 ;
-        yaw_offset = 0;
+        // yaw_offset = 0;
+
+        double yaw_sp =  constrainAngle(atti_out.yaw_sp + yaw_offset);
+
+        
+        ROS_INFO("SPR %3.1f P %3.1f Y %3.1f (OSP%3.2f ODOM:%3.1f FC%3.1f) T %2.2f", 
+            atti_out.roll_sp*57.3, 
+            atti_out.pitch_sp*57.3,
+            yaw_sp*57.3,
+            atti_out.yaw_sp*57.3,
+            yaw_odom*57.3,
+            yaw_fc*57.3,
+            atti_out.thrust_sp
+        );
+         
+
         dji_command_so3.axes.push_back(atti_out.roll_sp);       // x
         dji_command_so3.axes.push_back(atti_out.pitch_sp);       // y
         if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_THRUST) {
@@ -301,7 +320,7 @@ public:
         } else {
             dji_command_so3.axes.push_back(atti_out.thrust_sp); // z
         }
-        dji_command_so3.axes.push_back(atti_out.yaw_sp + yaw_offset);       // w
+        dji_command_so3.axes.push_back(yaw_sp);       // w
         dji_command_so3.axes.push_back(flag);
 
         control_pub.publish(dji_command_so3);
@@ -423,6 +442,8 @@ int main(int argc, char** argv)
     ros::NodeHandle nh("drone_position_control");
 
     DronePosControl pos_control(nh);
+
+    ROS_INFO("Pos control node ready");
     ros::spin();
 
 }
