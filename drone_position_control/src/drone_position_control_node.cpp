@@ -247,9 +247,10 @@ public:
         Eigen::Vector3d rpy = quat2eulers(q);
 
         //Original rpy is FLU, we need NED rpy
-        yaw_fc = -rpy.z();
+        fc_att_rpy = rpy;
+        yaw_fc = constrainAngle(-rpy.z() + M_PI/2);
 
-        // ROS_INFO("Yaw FC is %3.2f", yaw_fc);
+        // ROS_INFO("Yaw FC is %3.2f %3.2f", rpy.z(), yaw_fc);
     }
 
     void OnVisualOdometry(const nav_msgs::Odometry & odom) {

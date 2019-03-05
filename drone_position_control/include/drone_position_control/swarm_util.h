@@ -119,7 +119,7 @@ double constrainAngle(double x){
 
 double constrainAngle(double x){
     x = fmod(x + M_PI, 2*M_PI);
-    // if (x < 0)
-        // x += 360;
+    if (x < 0)
+        x += 2*M_PI;
     return x - M_PI;
 }

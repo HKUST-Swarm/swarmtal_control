@@ -446,7 +446,7 @@ void DroneCommander::fc_attitude_callback(const geometry_msgs::QuaternionStamped
         quat.x, quat.y, quat.z);
     Eigen::Vector3d rpy = quat2eulers(q);
     // ROS_INFO("Fc attitude %3.2f %3.2f %3.2f", rpy.x()*57.3, rpy.y()*57.3, rpy.z()*57.3);
-    yaw_fc = - rpy.z();
+    yaw_fc = - rpy.z() + M_PI/2;
 }
 
 void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, double z, bool z_use_vel, bool yaw_use_rate) {
@@ -674,6 +674,7 @@ void DroneCommander::process_input_source () {
 
 
 void DroneCommander::process_rc_input () {
+    //Force RC control velocity
     if (rc_moving_stick()) {
         request_ctrl_mode(DCMD::CTRL_MODE_POSVEL);
     } else {
