@@ -866,6 +866,9 @@ void DroneCommander::process_control_takeoff() {
         ctrl_cmd->pos_sp.x = takeoff_origin.x();
         ctrl_cmd->pos_sp.y = takeoff_origin.y();
         ctrl_cmd->pos_sp.z = state.takeoff_target_height + takeoff_origin.z();
+        ctrl_cmd->vel_sp.x = 0;
+        ctrl_cmd->vel_sp.y = 0;
+        ctrl_cmd->vel_sp.z = 0;
         
         // ROS_INFO("Already in air, fly to %3.2lf %3.2lf %3.2lf", ctrl_cmd->pos_sp.x, ctrl_cmd->pos_sp.y, ctrl_cmd->pos_sp.z);
     } else {
