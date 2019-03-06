@@ -604,7 +604,8 @@ bool DroneCommander::rc_request_onboard() {
 }
 
 bool DroneCommander::rc_request_vo() {
-    return (rc.axes[4] == 10000 && rc.axes[5] == -10000);
+    // return (rc.axes[4] == 10000 && rc.axes[5] == -10000);
+    return (rc.axes[4] == 10000);
 }
 
 bool DroneCommander::rc_moving_stick () {

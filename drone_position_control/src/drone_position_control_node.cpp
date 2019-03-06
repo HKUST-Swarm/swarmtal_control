@@ -33,6 +33,7 @@ class DronePosControl {
 
     Eigen::Vector3d pos_sp = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d vel_sp = Eigen::Vector3d(0, 0, 0);
+    Eigen::Vector3d vel_ff = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d acc_sp = Eigen::Vector3d(0, 0, 0);
 
     Quaterniond att_sp;
@@ -59,6 +60,9 @@ class DronePosControl {
     FILE * log_file;
 
     void recordCSV() {
+        if (log_file == nullptr) {
+            return;
+        }
         fprintf(
                   //0  1 2  3  4  5  6  7   8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27
             log_file, "%f,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
@@ -162,14 +166,22 @@ public:
         sprintf(buffer, "/home/dji/swarm_log_lastest/log_%d.csv", r);
 
         FILE* flog_list = fopen("/home/dji/swarm_log_lastest/log_list.txt", "a");
-        fprintf(flog_list,"%s\n", buffer);
-        fflush(flog_list);
-        fclose(flog_list);
+        if (flog_list != nullptr) {
+            fprintf(flog_list,"%s\n", buffer);
+            fflush(flog_list);
+            fclose(flog_list);
+        } else {
+            ROS_ERROR("Can't open loglist file");
+        }
+
         ROS_INFO("opening %s as log", buffer);
 
         log_file = fopen(buffer,"w");
-
-        ROS_INFO("Log inited");
+        if (log_file != nullptr) {
+            ROS_INFO("Log inited");
+        } else {
+            ROS_ERROR("Can't open log file");
+        }
     }
 
     void on_imu_data(const sensor_msgs::Imu & _imu) {
@@ -198,11 +210,15 @@ public:
     }
 
     void OnSwarmPosCommand(const swarmtal_msgs::drone_pos_ctrl_cmd & _cmd) {
+        vel_ff = Eigen::Vector3d(0, 0, 0);
         switch (_cmd.ctrl_mode) {
             case drone_pos_ctrl_cmd::CTRL_CMD_POS_MODE: {
                 pos_sp.x() = _cmd.pos_sp.x;
                 pos_sp.y() = _cmd.pos_sp.y;
                 pos_sp.z() = _cmd.pos_sp.z;
+                vel_ff.x() = _cmd.vel_sp.x;
+                vel_ff.y() = _cmd.vel_sp.y;
+                vel_ff.z() = _cmd.vel_sp.z;
                 break;
             } 
             case drone_pos_ctrl_cmd::CTRL_CMD_VEL_MODE: {
@@ -339,6 +355,7 @@ public:
             if (state.count % 50 == 0) {
                 ROS_INFO("Position controller idle mode");
             }
+            vel_ff = Eigen::Vector3d(0, 0, 0);
             pos_ctrl->reset();
             return;
         } 
@@ -347,7 +364,7 @@ public:
         
         if (state.ctrl_mode < drone_pos_ctrl_cmd::CTRL_CMD_ATT_THRUST_MODE) {
             if (state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_POS_MODE) {
-                vel_sp = pos_ctrl->control_pos(pos_sp, dt);            
+                vel_sp = pos_ctrl->control_pos(pos_sp, dt) + vel_ff; 
             }
             
             acc_sp = pos_ctrl->control_vel(vel_sp, dt);

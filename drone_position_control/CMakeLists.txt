@@ -32,7 +32,7 @@ include_directories(
 )
 
 
-add_executable(${PROJECT_NAME}_node src/drone_position_control_node.cpp)
+add_executable(${PROJECT_NAME}_node src/drone_position_control_node.cpp include/drone_position_control/controllers.h)
 
 ## same as for the library above
 add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
