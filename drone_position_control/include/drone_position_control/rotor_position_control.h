@@ -100,7 +100,10 @@ public:
     }
 
     inline double control(const double & abx_sp, double dt) {
-        return con.control(abx_sp - acc, dt) + param.level_thrust;
+        //This is NED
+        //Abx SP bigger, output thrust should be smaller(fly to ground)
+        //Abx SP smaller, output thrust should be bigger
+        return -con.control(abx_sp - acc, dt) + param.level_thrust;
     }
 };
 
@@ -127,7 +130,6 @@ public:
     Eigen::Vector3d pos = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d vel = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d acc = Eigen::Vector3d(0, 0, 0);
-    Eigen::Vector3d acc_global = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d vel_body = Eigen::Vector3d(0, 0, 0);
     Eigen::Quaterniond quat = Eigen::Quaterniond(1, 0, 0, 0);
 
@@ -155,12 +157,13 @@ public:
     virtual void set_body_acc(const Eigen::Vector3d & _acc) {
         acc = _acc;
 
+        if(param.coor_sys == FRAME_COOR_SYS::FLU) {
+            acc.z() = - acc.z();
+            acc.y() = - acc.y();
+        }
+        
         thrust_ctrl.set_acc(_acc.z());
 
-        if (att_inited)
-        {
-            acc_global = quat * acc;
-        }
     }
 
     virtual void set_attitude(const Eigen::Quaterniond & _quat) {
@@ -255,15 +258,23 @@ public:
             acc_sp.z() = - acc_sp.z();
             acc_sp.y() = - acc_sp.y();
         }
-
+        
+        //Norm vector
+        Eigen::Vector3d Up = Eigen::Vector3d(0, 0, -1);
+        Up = quat*Up; 
+        //All controller is ON NED
+        //So for hover, acc_sp and acc should be -9.8
+        //Accerelation UP, acc should be smaller than -9.8
         acc_sp.z() = acc_sp.z() - 9.8;
         
         // TODO:
         // Do not care about aerodynamics drag
         // Only for hover
-        ret.abx_sp = acc_sp.norm();
-
+        //Note that abx sp should be negative here!
+        ret.abx_sp = (Up.dot(acc_sp) * Up).z();
+        
         ret.thrust_sp = float_constrain(thrust_ctrl.control(ret.abx_sp, dt), MIN_THRUST, 1);
+        printf("abx sp %3.2f body acc %3.2f thrustsp %3.2f", ret.abx_sp, acc.z(), ret.thrust_sp);
 
         if (fabs(acc_sp.z()) > 0.1) {
             pitch_sp = float_constrain(- asin(acc_sp.x() / acc_sp.norm()), -MAX_TILT_ANGLE, MAX_TILT_ANGLE);

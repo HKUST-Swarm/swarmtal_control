@@ -70,8 +70,8 @@ class DronePosControl {
             return;
         }
         fprintf(
-                  //0  1 2  3  4  5  6  7   8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27
-            log_file, "%f,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
+                  //0  1 2  3  4  5  6  7   8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30
+            log_file, "%f,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
                 (ros::Time::now() - start_time).toSec(),//1
                 state.ctrl_mode,//2
                 state.pose.position.x,state.pose.position.y,state.pose.position.z,//5
@@ -82,7 +82,8 @@ class DronePosControl {
                 acc_sp.x(), acc_sp.y(), acc_sp.z(),//20
                 atti_out.roll_sp, atti_out.pitch_sp, atti_out.yaw_sp,//23
                 atti_out.thrust_sp,//24,
-                fc_att_rpy.x(), fc_att_rpy.y(), fc_att_rpy.z()//27
+                fc_att_rpy.x(), fc_att_rpy.y(), fc_att_rpy.z(),//27
+                angular_rate.x(), angular_rate.y(), angular_rate.z()
             );
         fflush(log_file);
         
@@ -195,16 +196,48 @@ public:
     }
 
     void on_imu_data(const sensor_msgs::Imu & _imu) {
+
+        Eigen::Matrix3d R_FLU2FRD; 
+        R_FLU2FRD << 1, 0, 0, 0, -1, 0, 0, 0, -1;
+        Eigen::Matrix3d R_ENU2NED;
+        R_ENU2NED << 0, 1, 0, 1, 0, 0, 0, 0, -1;
+
         state.imu_data = _imu;
         Eigen::Vector3d acc(
             state.imu_data.linear_acceleration.x,
             state.imu_data.linear_acceleration.y,
             state.imu_data.linear_acceleration.z
         );
+
+        //This is a FLU angular rate
         angular_rate.x() = _imu.angular_velocity.x * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.x();
         angular_rate.y() = _imu.angular_velocity.y * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.y();
         angular_rate.z() = _imu.angular_velocity.z * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.z();
         pos_ctrl->set_body_acc(acc);
+
+        geometry_msgs::Quaternion quat = _imu.orientation;
+
+
+        Eigen::Quaterniond q(quat.w, quat.x, quat.y, quat.z);
+
+        Eigen::Matrix3d RFLU2ENU = q.toRotationMatrix();
+
+        q = Eigen::Quaterniond(R_ENU2NED*RFLU2ENU*R_FLU2FRD.transpose());
+
+        Eigen::Vector3d rpy = quat2eulers(q);
+
+        //Original rpy is ENU, we need NED rpy
+        fc_att_rpy = rpy;
+        yaw_fc = constrainAngle(rpy.z());
+
+        ROS_INFO_THROTTLE(10.0, "FC Attitude roll %3.2f pitch %3.2f yaw %3.2f",
+            rpy.x()*57.3,
+            rpy.y()*57.3,
+            rpy.z()*57.3
+        );
+
+        pos_ctrl->set_attitude(q);
+
     }
 
     void set_drone_global_pos_vel(Eigen::Vector3d pos, Eigen::Vector3d vel) {
@@ -269,14 +302,14 @@ public:
     }
 
     void onFCAttitude(const geometry_msgs::QuaternionStamped & _quat) {
-        geometry_msgs::Quaternion quat = _quat.quaternion;
-        Eigen::Quaterniond q(quat.w, 
-            quat.x, quat.y, quat.z);
-        Eigen::Vector3d rpy = quat2eulers(q);
+        // geometry_msgs::Quaternion quat = _quat.quaternion;
+        // Eigen::Quaterniond q(quat.w, 
+            // quat.x, quat.y, quat.z);
+        // Eigen::Vector3d rpy = quat2eulers(q);
 
         //Original rpy is FLU, we need NED rpy
-        fc_att_rpy = rpy;
-        yaw_fc = constrainAngle(-rpy.z() + M_PI/2);
+        // fc_att_rpy = rpy;
+        // yaw_fc = constrainAngle(-rpy.z() + M_PI/2);
 
         // ROS_INFO("Yaw FC is %3.2f %3.2f", rpy.z(), yaw_fc);
     }
@@ -318,6 +351,7 @@ public:
 
         pos_ctrl->set_pos(pos);
         pos_ctrl->set_global_vel(vel);
+        pos_ctrl->set_attitude(quat);
         set_drone_global_pos_vel(pos, vel);
 
         odom_att_rpy = quat2eulers(quat);

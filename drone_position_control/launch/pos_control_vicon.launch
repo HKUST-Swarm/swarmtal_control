@@ -10,7 +10,7 @@
         odom_gc_pos:
             x: 0
             y: 0
-            z: 0.1
+            z: 0.08
         </rosparam>
     </node>
 </launch>
