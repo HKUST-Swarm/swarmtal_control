@@ -38,4 +38,4 @@ pid_param:
         i : 0.01
         d : 0.000
         max_i: 30.0
-        level_thrust: 0.1
+        level_thrust: 0.2

@@ -18,7 +18,6 @@
 using namespace swarmtal_msgs;
 #define MAX_CMD_LOST_TIME 0.5f
 #define USE_DJI_THRUST_CTRL
-
 #define ANGULARRATE_MIX 0.9
 
 class DronePosControl {
@@ -392,11 +391,11 @@ public:
             atti_out.thrust_sp
         );
          
-        atti_out.thrust_sp = float_constrain(atti_out.thrust_sp, 0, 0.5);
 
         dji_command_so3.axes.push_back(atti_out.roll_sp);       // x
         dji_command_so3.axes.push_back(atti_out.pitch_sp);       // y
         if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_THRUST) {
+            atti_out.thrust_sp = float_constrain(atti_out.thrust_sp, 0, 0.6);
             dji_command_so3.axes.push_back(atti_out.thrust_sp*100); // z
         } else {
             dji_command_so3.axes.push_back(atti_out.thrust_sp); // z
