@@ -36,6 +36,8 @@ class DronePosControl {
     Eigen::Vector3d vel_ff = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d acc_sp = Eigen::Vector3d(0, 0, 0);
 
+    Eigen::Vector3d odom_gc_pos = Eigen::Vector3d(0, 0, 0);
+
     Quaterniond att_sp;
     float z_sp = 0;
 
@@ -119,6 +121,10 @@ class DronePosControl {
         nh.param<double>("pid_param/thr/d", ctrlP.thrust_ctrl.abx.d, 0);
         nh.param<double>("pid_param/thr/max_i", ctrlP.thrust_ctrl.abx.max_err_i, 0);
         nh.param<double>("pid_param/thr/level_thrust", ctrlP.thrust_ctrl.level_thrust, 0.3);
+
+        nh.param<double>("odom_gc_pos/x", odom_gc_pos.x(), 0);
+        nh.param<double>("odom_gc_pos/y", odom_gc_pos.y(), 0);
+        nh.param<double>("odom_gc_pos/z", odom_gc_pos.z(), 0);
     }
     ros::Timer control_timer;
 
@@ -287,6 +293,10 @@ public:
 
         Eigen::Quaterniond quat(pose.orientation.w, 
             pose.orientation.x, pose.orientation.y, pose.orientation.z);
+        
+        ROS_INFO("original pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
+        pos = pos - quat*odom_gc_pos;
+        ROS_INFO("transfed pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
 
         pos_ctrl->set_pos(pos);
         pos_ctrl->set_global_vel(vel);

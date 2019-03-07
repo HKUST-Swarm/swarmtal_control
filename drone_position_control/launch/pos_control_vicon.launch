@@ -1,0 +1,16 @@
+<launch>
+    <arg name="vo_topic" default="/vins_estimator/imu_propagate"/>
+    <node pkg="drone_position_control" name="drone_position_control" type="drone_position_control_node" output="screen">
+        <rosparam command="load" file="$(find drone_position_control)/launch/pos_control_param.yaml" />
+        <remap from="/drone_position_control/odometry" to="$(arg vo_topic)"/>
+        <remap from="/drone_position_control/fc_attitude" to="/dji_sdk_1/dji_sdk/attitude"/>
+        <remap from="/drone_position_control/dji_sdk_control" to="/dji_sdk_1/dji_sdk/flight_control_setpoint_generic"/>
+        <remap from="/drone_position_control/fc_imu" to="/dji_sdk_1/dji_sdk/imu"/>
+        <rosparam>
+        odom_gc_pos:
+            x: 0
+            y: 0
+            z: 0.1
+        </rosparam>
+    </node>
+</launch>
