@@ -1,5 +1,5 @@
 <launch>
-    <arg name="vo_topic" default="/vins_estimator/imu_propagate"/>
+    <arg name="vo_topic" default="/uwb_vicon_odom"/>
     <node pkg="drone_position_control" name="drone_position_control" type="drone_position_control_node" output="screen">
         <rosparam command="load" file="$(find drone_position_control)/launch/pos_control_param.yaml" />
         <remap from="/drone_position_control/odometry" to="$(arg vo_topic)"/>
