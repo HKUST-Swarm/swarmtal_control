@@ -19,6 +19,8 @@ using namespace swarmtal_msgs;
 #define MAX_CMD_LOST_TIME 0.5f
 #define USE_DJI_THRUST_CTRL
 
+#define ANGULARRATE_MIX 0.9
+
 class DronePosControl {
     ros::NodeHandle & nh;
     
@@ -37,6 +39,8 @@ class DronePosControl {
     Eigen::Vector3d acc_sp = Eigen::Vector3d(0, 0, 0);
 
     Eigen::Vector3d odom_gc_pos = Eigen::Vector3d(0, 0, 0);
+
+    Eigen::Vector3d angular_rate = Eigen::Vector3d(0, 0, 0);
 
     Quaterniond att_sp;
     float z_sp = 0;
@@ -197,7 +201,9 @@ public:
             state.imu_data.linear_acceleration.y,
             state.imu_data.linear_acceleration.z
         );
-
+        angular_rate.x() = _imu.angular_velocity.x * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.x();
+        angular_rate.y() = _imu.angular_velocity.y * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.y();
+        angular_rate.z() = _imu.angular_velocity.z * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.z();
         pos_ctrl->set_body_acc(acc);
     }
 
@@ -279,7 +285,7 @@ public:
         static Eigen::Vector3d ang_vel_last = Eigen::Vector3d(0, 0, 0);
         auto pose = odom.pose.pose;
         auto velocity = odom.twist.twist.linear;
-        auto angvel = odom.twist.twist.angular;
+        // auto angvel = odom.twist.twist.angular;
 
         Eigen::Vector3d pos(
             pose.position.x,
@@ -293,8 +299,7 @@ public:
             velocity.z
         );
 
-        Eigen::Vector3d ang_vel(angvel.x, angvel.y ,angvel.z);
-        ang_vel = ang_vel_last * 0.8 + ang_vel * 0.2;
+        auto ang_vel = angular_rate;
         Eigen::Matrix3d omgx;
         omgx << 0, -ang_vel.z(), ang_vel.y(),
                 ang_vel.z(), 0, -ang_vel.x(),
@@ -305,9 +310,11 @@ public:
             pose.orientation.x, pose.orientation.y, pose.orientation.z);
         
         // ROS_INFO("original pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
+        ROS_INFO("original vel %3.3f %3.3f %3.3f", vel.x(), vel.y(), vel.z());
         pos = pos - quat*odom_gc_pos;
         vel = vel - omgx*quat.toRotationMatrix()*odom_gc_pos;
         // ROS_INFO("transfed pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
+        ROS_INFO("transfed vel %3.3f %3.3f %3.3f", vel.x(), vel.y(), vel.z());
 
         pos_ctrl->set_pos(pos);
         pos_ctrl->set_global_vel(vel);
