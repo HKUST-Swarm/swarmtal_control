@@ -230,12 +230,13 @@ public:
         fc_att_rpy = rpy;
         yaw_fc = constrainAngle(rpy.z());
 
-        ROS_INFO_THROTTLE(10.0, "FC Attitude roll %3.2f pitch %3.2f yaw %3.2f",
+        /*
+        ROS_INFO_THROTTLE(1.0, "FC Attitude roll %3.2f pitch %3.2f yaw %3.2f",
             rpy.x()*57.3,
             rpy.y()*57.3,
             rpy.z()*57.3
         );
-
+        */
         pos_ctrl->set_attitude(q);
 
     }
@@ -343,11 +344,11 @@ public:
             pose.orientation.x, pose.orientation.y, pose.orientation.z);
         
         // ROS_INFO("original pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
-        ROS_INFO("original vel %3.3f %3.3f %3.3f", vel.x(), vel.y(), vel.z());
+        //ROS_INFO("original vel %3.3f %3.3f %3.3f", vel.x(), vel.y(), vel.z());
         pos = pos - quat*odom_gc_pos;
         vel = vel - omgx*quat.toRotationMatrix()*odom_gc_pos;
         // ROS_INFO("transfed pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
-        ROS_INFO("transfed vel %3.3f %3.3f %3.3f", vel.x(), vel.y(), vel.z());
+        //ROS_INFO("transfed vel %3.3f %3.3f %3.3f", vel.x(), vel.y(), vel.z());
 
         pos_ctrl->set_pos(pos);
         pos_ctrl->set_global_vel(vel);
@@ -391,11 +392,12 @@ public:
             atti_out.thrust_sp
         );
          
+        atti_out.thrust_sp = float_constrain(atti_out.thrust_sp, 0, 0.5);
 
         dji_command_so3.axes.push_back(atti_out.roll_sp);       // x
         dji_command_so3.axes.push_back(atti_out.pitch_sp);       // y
         if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_THRUST) {
-            dji_command_so3.axes.push_back(atti_out.thrust_sp * 100); // z
+            dji_command_so3.axes.push_back(atti_out.thrust_sp*100); // z
         } else {
             dji_command_so3.axes.push_back(atti_out.thrust_sp); // z
         }
@@ -414,9 +416,7 @@ public:
         }
         if (state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_IDLE_MODE) {
             //IDLE
-            if (state.count % 50 == 0) {
-                ROS_INFO("Position controller idle mode");
-            }
+            ROS_INFO_THROTTLE(1.0, "Position controller idle mode");
             vel_ff = Eigen::Vector3d(0, 0, 0);
             pos_ctrl->reset();
             return;

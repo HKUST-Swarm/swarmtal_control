@@ -28,14 +28,14 @@ pid_param:
         max_i : 20
         
     v_z:
-        p : 2.5
+        p : 0.5
         i : 0.0
-        d : 0.2
+        d : 0.0
         max_i: 1000
 
     thr:
-        p : 0.05
+        p : 0.02
         i : 0.01
-        d : 0.000075 
+        d : 0.000
         max_i: 30.0
-        level_thrust: 0.3
+        level_thrust: 0.1

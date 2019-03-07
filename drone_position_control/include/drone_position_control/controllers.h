@@ -82,8 +82,8 @@ public:
             err_integrate = -param.max_err_i;
         }
 
-        // if (report)
-        // printf("ERR %3.2f ERRI %3.2f OUTPUTI %3.2f OUTPUT %3.2f\n", err, err_integrate,  err_integrate * param.i, ret);
+        if (report)
+         printf("ERR %3.2f ERRI %3.2f OUTPUTI %3.2f OUTPUT %3.2f\n", err, err_integrate,  err_integrate * param.i, ret);
 
         return ret;
 

@@ -7,7 +7,7 @@
 
 using namespace Eigen;
 
-#define GRAVITY (9.695f)
+#define GRAVITY (9.80f)
 #define MAX_HORIZON_VEL 10.0
 #define MAX_VERTICAL_VEL 3.0
 #define MAX_VERTICAL_ACC 10.0
@@ -103,7 +103,8 @@ public:
         //This is NED
         //Abx SP bigger, output thrust should be smaller(fly to ground)
         //Abx SP smaller, output thrust should be bigger
-        return -con.control(abx_sp - acc, dt) + param.level_thrust;
+        printf("In thrust control abx %3.2f acc %3.2f\n", abx_sp, acc);
+        return -con.control(abx_sp - acc, dt, true) + param.level_thrust;
     }
 };
 
@@ -162,7 +163,7 @@ public:
             acc.y() = - acc.y();
         }
         
-        thrust_ctrl.set_acc(_acc.z());
+        thrust_ctrl.set_acc(acc.z());
 
     }
 
@@ -274,7 +275,7 @@ public:
         ret.abx_sp = (Up.dot(acc_sp) * Up).z();
         
         ret.thrust_sp = float_constrain(thrust_ctrl.control(ret.abx_sp, dt), MIN_THRUST, 1);
-        printf("abx sp %3.2f body acc %3.2f thrustsp %3.2f", ret.abx_sp, acc.z(), ret.thrust_sp);
+        printf("AccZ %3.2f abx sp %3.2f body acc %3.2f thrustsp %3.2f\n", acc_sp.z(), ret.abx_sp, acc.z(), ret.thrust_sp);
 
         if (fabs(acc_sp.z()) > 0.1) {
             pitch_sp = float_constrain(- asin(acc_sp.x() / acc_sp.norm()), -MAX_TILT_ANGLE, MAX_TILT_ANGLE);
