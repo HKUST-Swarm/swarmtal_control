@@ -276,6 +276,7 @@ public:
     }
 
     void OnVisualOdometry(const nav_msgs::Odometry & odom) {
+        static Eigen::Vector3d ang_vel_last = Eigen::Vector3d(0, 0, 0);
         auto pose = odom.pose.pose;
         auto velocity = odom.twist.twist.linear;
         auto angvel = odom.twist.twist.angular;
@@ -293,7 +294,7 @@ public:
         );
 
         Eigen::Vector3d ang_vel(angvel.x, angvel.y ,angvel.z);
-
+        ang_vel = ang_vel_last * 0.6 + ang_vel * 0.2;
         Eigen::Matrix3d omgx;
         omgx << 0, -ang_vel.z(), ang_vel.y(),
                 ang_vel.z(), 0, -ang_vel.x(),
