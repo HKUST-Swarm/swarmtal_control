@@ -278,6 +278,7 @@ public:
     void OnVisualOdometry(const nav_msgs::Odometry & odom) {
         auto pose = odom.pose.pose;
         auto velocity = odom.twist.twist.linear;
+        auto angvel = odom.twist.twist.angular;
 
         Eigen::Vector3d pos(
             pose.position.x,
@@ -291,12 +292,21 @@ public:
             velocity.z
         );
 
+        Eigen::Vector3d ang_vel(angvel.x, angvel.y ,angvel.z);
+
+        Eigen::Matrix3d omgx;
+        omgx << 0, -ang_vel.z(), ang_vel.y(),
+                ang_vel.z(), 0, -ang_vel.x(),
+                -ang_vel.y(), ang_vel.x(), 0;
+
+
         Eigen::Quaterniond quat(pose.orientation.w, 
             pose.orientation.x, pose.orientation.y, pose.orientation.z);
         
-        ROS_INFO("original pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
+        // ROS_INFO("original pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
         pos = pos - quat*odom_gc_pos;
-        ROS_INFO("transfed pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
+        vel = vel - omgx*quat.toRotationMatrix()*odom_gc_pos;
+        // ROS_INFO("transfed pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
 
         pos_ctrl->set_pos(pos);
         pos_ctrl->set_global_vel(vel);
