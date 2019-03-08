@@ -8,6 +8,7 @@ uint32 ctrl_mode
 
 geometry_msgs/Vector3 pos_sp
 geometry_msgs/Vector3 vel_sp
+geometry_msgs/Vector3 acc_sp
 geometry_msgs/Quaternion att_sp
 float64 yaw_sp
 float64 z_sp

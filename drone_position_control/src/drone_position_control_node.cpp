@@ -35,6 +35,7 @@ class DronePosControl {
     Eigen::Vector3d pos_sp = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d vel_sp = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d vel_ff = Eigen::Vector3d(0, 0, 0);
+    Eigen::Vector3d acc_ff = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d acc_sp = Eigen::Vector3d(0, 0, 0);
 
     Eigen::Vector3d odom_gc_pos = Eigen::Vector3d(0, 0, 0);
@@ -256,6 +257,7 @@ public:
 
     void OnSwarmPosCommand(const swarmtal_msgs::drone_pos_ctrl_cmd & _cmd) {
         vel_ff = Eigen::Vector3d(0, 0, 0);
+        acc_ff = Eigen::Vector3d(0, 0, 0);
         switch (_cmd.ctrl_mode) {
             case drone_pos_ctrl_cmd::CTRL_CMD_POS_MODE: {
                 pos_sp.x() = _cmd.pos_sp.x;
@@ -264,12 +266,18 @@ public:
                 vel_ff.x() = _cmd.vel_sp.x;
                 vel_ff.y() = _cmd.vel_sp.y;
                 vel_ff.z() = _cmd.vel_sp.z;
+                acc_ff.x() = _cmd.acc_sp.x;
+                acc_ff.y() = _cmd.acc_sp.y;
+                acc_ff.z() = _cmd.acc_sp.z;
                 break;
             } 
             case drone_pos_ctrl_cmd::CTRL_CMD_VEL_MODE: {
                 vel_sp.x() = _cmd.vel_sp.x;
                 vel_sp.y() = _cmd.vel_sp.y;
                 vel_sp.z() = _cmd.vel_sp.z;
+                acc_ff.x() = _cmd.acc_sp.x;
+                acc_ff.y() = _cmd.acc_sp.y;
+                acc_ff.z() = _cmd.acc_sp.z;
                 break;
             }
             case drone_pos_ctrl_cmd::CTRL_CMD_ATT_THRUST_MODE:
@@ -432,7 +440,7 @@ public:
 
             acc_sp.z() =  pos_ctrl->control_vel_z(vel_sp.z(), dt);
 
-
+            acc_sp = acc_sp + acc_ff;
             //Send acc sp to network or
             YawCMD yaw_cmd;
             yaw_cmd.yaw_mode = YAW_MODE_LOCK;

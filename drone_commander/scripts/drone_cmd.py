@@ -129,24 +129,37 @@ if __name__ == "__main__":
         cmd.param6 = 0
         cmd.param7 = 0
         cmd.param8 = 0
+        cmd.param9 = 0
+        cmd.param10 = 0
+
         t = 0
         while not rospy.is_shutdown():
             x = ox + math.sin(t*math.pi*2/T)*r
             y = oy + math.cos(t*math.pi*2/T)*r
             vx = math.cos(t*math.pi*2/T) * r * math.pi*2/T
             vy = -math.sin(t*math.pi*2/T) * r * math.pi*2/T
+            ax = - math.sin(t*math.pi*2/T) * r * math.pi*2/T * math.pi*2/T
+            ay = - math.cos(t*math.pi*2/T) * r * math.pi*2/T * math.pi*2/T
+
             cmd.param1 = int(x*10000)
             cmd.param2 = int(y*10000)
             cmd.param3 = int(oz*10000)
             cmd.param5 = int(vx*10000)
             cmd.param6 = int(vy*10000)
-            print("{:3.2f} xyz {:3.2f} {:3.2f} {:3.2f} ff".format(t, x, y, oz, vx, vy))
+            cmd.param7 = 0
+
+            cmd.param8 = ax
+            cmd.param9 = ay
+
+            print("{:3.2f} xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f} {:3.2f} {:3.2f}".format(t, x, y, oz, vx, vy, ax, ay))
             send(cmd, args, pub)
             t = t + 0.02
             rate.sleep()
 
     elif args.command_type == "sweep":
         cmd.command_type = drone_onboard_command.CTRL_POS_COMMAND
+        cmd.param4 = 666666
+
         print("Will sweep axis {} @ origin {} {} {}, amp {} T {} freq {}:{}/s by{} times".format(
             args.axis,
             args.center[0],
@@ -165,6 +178,7 @@ if __name__ == "__main__":
 
         t = 0
         count = 0
+
         while not rospy.is_shutdown() and count < args.count:
             x = args.center[0]
             y = args.center[1]

@@ -12,7 +12,7 @@ uint32 command_type
 
 # For POS param1 2 3 is x y z * 10000 
 # 4 is yaw*10000 if yaw =666666, then use last yawsp
-# 567 is vel feedforward
+# 567 is vel feedforward 8 9 10
 
 # For VEL param1 2 3 is x y z * 10000 
 # 4 is yaw*10000 if yaw =666666, then use last yawsp
@@ -33,3 +33,5 @@ int32 param5
 int32 param6
 int32 param7
 int32 param8
+int32 param9
+int32 param10
