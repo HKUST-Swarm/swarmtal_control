@@ -449,6 +449,8 @@ void DroneCommander::fc_attitude_callback(const geometry_msgs::QuaternionStamped
     Eigen::Matrix3d R_ENU2NED;
     R_ENU2NED << 0, 1, 0, 1, 0, 0, 0, 0, -1;
 
+    Eigen::Quaterniond q(quat.w, quat.x, quat.y, quat.z);
+
     Eigen::Matrix3d RFLU2ENU = q.toRotationMatrix();
 
     q = Eigen::Quaterniond(R_ENU2NED*RFLU2ENU*R_FLU2FRD.transpose());
@@ -456,8 +458,7 @@ void DroneCommander::fc_attitude_callback(const geometry_msgs::QuaternionStamped
     Eigen::Vector3d rpy = quat2eulers(q);
 
     //Original rpy is ENU, we need NED rpy
-    fc_att_rpy = rpy;
-    yaw_fc = constrainAngle(rpy.z());
+    yaw_fc = rpy.z();
 
 }
 
