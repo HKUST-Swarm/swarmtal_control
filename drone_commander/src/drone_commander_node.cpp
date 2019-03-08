@@ -219,8 +219,8 @@ public:
     void send_ctrl_cmd();
 
     void set_att_setpoint(double roll, double pitch, double yawrate, double z, bool z_use_vel=true, bool yaw_use_rate=true);
-    void set_pos_setpoint(double x, double y, double z, double yaw=NAN, double vx_ff=0, double vy_ff=0, double vz_ff=0);
-    void set_vel_setpoint(double vx, double vy, double vz, double yaw=NAN);
+    void set_pos_setpoint(double x, double y, double z, double yaw=NAN, double vx_ff=0, double vy_ff=0, double vz_ff=0, double ax_ff=0, double ay_ff=0, double az_ff=0);
+    void set_vel_setpoint(double vx, double vy, double vz, double yaw=NAN, double ax_ff=0, double ay_ff=0, double az_ff=0);
 
 };
 
@@ -442,11 +442,23 @@ void DroneCommander::flight_status_callback(const std_msgs::UInt8 & _flight_stat
 
 void DroneCommander::fc_attitude_callback(const geometry_msgs::QuaternionStamped & _quat) {
     geometry_msgs::Quaternion quat = _quat.quaternion;
-    Eigen::Quaterniond q(quat.w, 
-        quat.x, quat.y, quat.z);
+
+
+    Eigen::Matrix3d R_FLU2FRD; 
+    R_FLU2FRD << 1, 0, 0, 0, -1, 0, 0, 0, -1;
+    Eigen::Matrix3d R_ENU2NED;
+    R_ENU2NED << 0, 1, 0, 1, 0, 0, 0, 0, -1;
+
+    Eigen::Matrix3d RFLU2ENU = q.toRotationMatrix();
+
+    q = Eigen::Quaterniond(R_ENU2NED*RFLU2ENU*R_FLU2FRD.transpose());
+
     Eigen::Vector3d rpy = quat2eulers(q);
-    // ROS_INFO("Fc attitude %3.2f %3.2f %3.2f", rpy.x()*57.3, rpy.y()*57.3, rpy.z()*57.3);
-    yaw_fc = - rpy.z() + M_PI/2;
+
+    //Original rpy is ENU, we need NED rpy
+    fc_att_rpy = rpy;
+    yaw_fc = constrainAngle(rpy.z());
+
 }
 
 void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, double z, bool z_use_vel, bool yaw_use_rate) {
@@ -474,13 +486,16 @@ void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, dou
 
 }
 
-void DroneCommander::set_pos_setpoint(double x, double y, double z, double yaw, double vx_ff, double vy_ff, double vz_ff) {
+void DroneCommander::set_pos_setpoint(double x, double y, double z, double yaw, double vx_ff, double vy_ff, double vz_ff, double ax_ff, double ay_ff, double az_ff) {
     ctrl_cmd->pos_sp.x = x;
     ctrl_cmd->pos_sp.y = y;
     ctrl_cmd->pos_sp.z = z;
     ctrl_cmd->vel_sp.x = vx_ff;
     ctrl_cmd->vel_sp.y = vy_ff;
     ctrl_cmd->vel_sp.z = vz_ff;
+    ctrl_cmd->acc_sp.x = ax_ff;
+    ctrl_cmd->acc_sp.y = ay_ff;
+    ctrl_cmd->acc_sp.z = az_ff;
     if (!std::isnan(yaw)) {
         ctrl_cmd->yaw_sp = yaw;
     }
@@ -488,10 +503,13 @@ void DroneCommander::set_pos_setpoint(double x, double y, double z, double yaw, 
     ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_POS_MODE;
 }
 
-void DroneCommander::set_vel_setpoint(double vx, double vy, double vz, double yaw) {
+void DroneCommander::set_vel_setpoint(double vx, double vy, double vz, double yaw, double ax_ff, double ay_ff, double az_ff) {
     ctrl_cmd->vel_sp.x = vx;
     ctrl_cmd->vel_sp.y = vy;
     ctrl_cmd->vel_sp.z = vz;
+    ctrl_cmd->acc_sp.x = ax_ff;
+    ctrl_cmd->acc_sp.y = ay_ff;
+    ctrl_cmd->acc_sp.z = az_ff;
     if (!std::isnan(yaw)) {
         ctrl_cmd->yaw_sp = yaw;
     }
@@ -518,12 +536,15 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
                 double vx_ff = ((double)_cmd.param5) / 10000;
                 double vy_ff = ((double)_cmd.param6) / 10000;
                 double vz_ff = ((double)_cmd.param7) / 10000;
+                double ax_ff = ((double)_cmd.param8) / 10000;
+                double ay_ff = ((double)_cmd.param9) / 10000;
+                double az_ff = ((double)_cmd.param10) / 10000;
 
                 // ROS_INFO("Recv pos cmd, fly to %3.2 %3.2f %3.2f", x, y, z);
                 if (_cmd.param4 == MAGIC_YAW_NAN) {
-                    set_pos_setpoint(x, y, z, NAN, vx_ff, vy_ff, vz_ff);
+                    set_pos_setpoint(x, y, z, NAN, vx_ff, vy_ff, vz_ff, ax_ff, ay_ff, az_ff);
                 } else {
-                    set_pos_setpoint(x, y, z, yaw, vx_ff, vy_ff, vz_ff);
+                    set_pos_setpoint(x, y, z, yaw, vx_ff, vy_ff, vz_ff, ax_ff, ay_ff, az_ff);
                 }
 
                 break;
@@ -535,8 +556,13 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
                 double y = ((double)_cmd.param2) / 10000;
                 double z = ((double)_cmd.param3) / 10000;
                 double yaw = ((double) _cmd.param4) / 10000;
+
+                double ax_ff = ((double)_cmd.param5) / 10000;
+                double ay_ff = ((double)_cmd.param6) / 10000;
+                double az_ff = ((double)_cmd.param7) / 10000;
+
                 if (_cmd.param4 == MAGIC_YAW_NAN) {
-                    set_vel_setpoint(x, y, z);
+                    set_vel_setpoint(x, y, z, ax_ff, ay_ff, az_ff);
                 }
                 break;
             }
@@ -729,7 +755,7 @@ void DroneCommander::process_rc_input () {
         case DCMD::CTRL_MODE_IDLE:        
         case DCMD::CTRL_MODE_ATT:
         default: {
-            set_att_setpoint(x * RC_MAX_TILT_ANGLE, -y* RC_MAX_TILT_ANGLE, r * RC_MAX_YAW_RATE, z);
+            set_att_setpoint(-x * RC_MAX_TILT_ANGLE, y* RC_MAX_TILT_ANGLE, r * RC_MAX_YAW_RATE, z);
             break;
         }
     }
@@ -862,23 +888,11 @@ void DroneCommander::process_control_takeoff() {
 
     if (is_in_air && state.vo_valid) {
         //Already in air, process as a  posvel control
-        ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_POS_MODE;
-        ctrl_cmd->pos_sp.x = takeoff_origin.x();
-        ctrl_cmd->pos_sp.y = takeoff_origin.y();
-        ctrl_cmd->pos_sp.z = state.takeoff_target_height + takeoff_origin.z();
-        ctrl_cmd->vel_sp.x = 0;
-        ctrl_cmd->vel_sp.y = 0;
-        ctrl_cmd->vel_sp.z = 0;
+        set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
         
         // ROS_INFO("Already in air, fly to %3.2lf %3.2lf %3.2lf", ctrl_cmd->pos_sp.x, ctrl_cmd->pos_sp.y, ctrl_cmd->pos_sp.z);
     } else {
-        ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_ATT_VELZ_MODE;
-        Eigen::Quaterniond quat_sp = (Eigen::Quaterniond) Eigen::AngleAxisd(ctrl_cmd->yaw_sp, Eigen::Vector3d::UnitZ());
-        ctrl_cmd->att_sp.w = quat_sp.w();
-        ctrl_cmd->att_sp.x = quat_sp.x();
-        ctrl_cmd->att_sp.y = quat_sp.y();
-        ctrl_cmd->att_sp.z = quat_sp.z();
-        ctrl_cmd->z_sp = TAKEOFF_VEL_Z;
+        set_att_setpoint(0, 0, ctrl_cmd->yaw_sp, TAKEOFF_VEL_Z, true, false);
     }
 
 
