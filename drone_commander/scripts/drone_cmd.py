@@ -148,8 +148,8 @@ if __name__ == "__main__":
             cmd.param6 = int(vy*10000)
             cmd.param7 = 0
 
-            cmd.param8 = ax
-            cmd.param9 = ay
+            cmd.param8 = int(ax*10000)
+            cmd.param9 = int(ay*10000)
 
             print("{:3.2f} xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f} {:3.2f} {:3.2f}".format(t, x, y, oz, vx, vy, ax, ay))
             send(cmd, args, pub)
