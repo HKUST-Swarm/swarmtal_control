@@ -6,6 +6,7 @@ import rospy
 from swarmtal_msgs.msg import drone_onboard_command
 import sys
 import math
+import numpy as np
 
 def send(cmd, args, pub):
     # pub = rospy.Publisher("/drone_commander/onboard_command", drone_onboard_command, queue_size=1)
@@ -15,7 +16,7 @@ def send(cmd, args, pub):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='A easy command tool for sending command to swarm drone')
     parser.add_argument('command_type', metavar='command_type', choices=
-        ["takeoff", "landing", "flyto", "arm", "disarm", "joy_control", "circle", "sweep"], help="Type of command to send")
+        ["takeoff", "landing", "flyto", "arm", "disarm", "joy_control", "circle", "sweep", "csv"], help="Type of command to send")
     parser.add_argument("-c","--center", nargs=3, type=float, help="center for circle", default=[0, 0, 1])
     parser.add_argument("-r","--radius", nargs=1, type=float, help="radius for circle", default=0.5)
     parser.add_argument("-t","--cycle", type=float, help="cycle for circle or for sweep a cycle", default=30)
@@ -148,10 +149,55 @@ if __name__ == "__main__":
             cmd.param6 = int(vy*10000)
             cmd.param7 = 0
 
-            cmd.param8 = ax
-            cmd.param9 = ay
+            cmd.param8 = int(ax*10000)
+            cmd.param9 = int(ay*10000)
 
-            print("{:3.2f} xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f} {:3.2f} {:3.2f}".format(t, x, y, oz, vx, vy, ax, ay))
+            rospy.loginfo("{:3.2f} xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f} {:3.2f} {:3.2f}".format(t, x, y, oz, vx, vy, ax, ay))
+            send(cmd, args, pub)
+            t = t + 0.02
+            rate.sleep()
+
+
+    elif args.command_type == "csv":
+        cmd.command_type = drone_onboard_command.CTRL_POS_COMMAND
+        cmd.param4 = 666666
+        if len(args.params) < 1:
+            rospy.logerror("No csv specs, exit")
+            sys.exit(-1)
+        else:
+            csv_path = args.params[0]
+            csv_data = np.genfromtxt(csv_path, delimiter=',')
+            rospy.loginfo("CSV duration {}s len {}".format(len(csv_data), len(csv_data)/50))
+
+        cmd.param1 = 0
+        cmd.param2 = 0
+        cmd.param3 = 0
+        cmd.param4 = 666666
+        cmd.param5 = 0
+        cmd.param6 = 0
+        cmd.param7 = 0
+        cmd.param8 = 0
+        cmd.param9 = 0
+        cmd.param10 = 0
+
+        t = 0
+        tick = 0
+        while not rospy.is_shutdown():
+            x = csv_data[tick,0]
+            y = csv_data[tick,1]
+            z = csv_data[tick,2]
+            vx = csv_data[tick,3]
+            vy = csv_data[tick,4]
+
+            cmd.param1 = int(x*10000)
+            cmd.param2 = int(y*10000)
+            cmd.param3 = int(z*10000)
+            cmd.param5 = int(vx*10000)
+            cmd.param6 = int(vy*10000)
+            cmd.param7 = 0
+
+
+            rospy.loginfo_throttle(0.1, "{:3.2f} xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f} {:3.2f} {:3.2f}".format(t, x, y, oz, vx, vy, ax, ay))
             send(cmd, args, pub)
             t = t + 0.02
             rate.sleep()
