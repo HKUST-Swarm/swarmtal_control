@@ -308,7 +308,7 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
 
 void DroneCommander::try_arm(bool arm) {
     dji_sdk::DroneArmControl arm_srv;
-    if (arm==state.is_armed) 
+    if (arm==state.is_armed )
         return;
     // if ((ros::Time::now() - last_try_arm_time).toSec() < MIN_TRY_ARM_DURATION) {
     //     ROS_INFO("Will try arm again later");
@@ -320,12 +320,24 @@ void DroneCommander::try_arm(bool arm) {
 
         return;
     }
-    if (state.djisdk_valid && state.flight_status == DCMD::FLIGHT_STATUS_IDLE) {
+    if (!arm) {
+        request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
+    }
+    if (state.djisdk_valid && state.flight_status == DCMD::FLIGHT_STATUS_IDLE && arm) {
         // TODO:
         // rosservice call /dji_sdk_1/dji_sdk/drone_arm_control "arm: 0"
         arm_srv.request.arm = arm;
         ros::service::call("/dji_sdk_1/dji_sdk/drone_arm_control", arm_srv);
         ROS_INFO("Try arm success %d", arm_srv.response.result);
+        // if *
+        if (!arm_srv.response.result) {
+            fail_arm_times ++;
+        }
+    }
+    if (state.djisdk_valid && ! arm) {
+        arm_srv.request.arm = arm;
+        ros::service::call("/dji_sdk_1/dji_sdk/drone_arm_control", arm_srv);
+        ROS_INFO("Try DIsarm success %d", arm_srv.response.result);
         // if *
         if (!arm_srv.response.result) {
             fail_arm_times ++;
@@ -987,7 +999,7 @@ void DroneCommander::send_ctrl_cmd() {
 }
 
 void DroneCommander::prepare_control_hover() {
-    if (last_hover_count < control_count - 1) {
+    if (last_hover_count < control_count - 1 && this->state.control_auth == DCMD::CTRL_AUTH_THIS && state.is_armed && state.vo_valid ) {
         //Need to start new hover
 
         hover_pos.x() = odometry.pose.pose.position.x;

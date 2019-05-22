@@ -30,6 +30,7 @@ uint32 CTRL_MODE_MISSION=6
 
 uint32 commander_ctrl_mode
 
+float32 bat_vol
 
 bool is_armed
 bool rc_valid
