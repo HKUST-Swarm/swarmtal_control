@@ -11,6 +11,7 @@
 #include <sensor_msgs/Joy.h>
 #include <std_msgs/UInt8.h>
 #include <math.h>
+#include <sensor_msgs/BatteryState.h>
 
 #if FCHardware == DJI_SDK
 #include <dji_sdk/ControlDevice.h>
@@ -34,12 +35,12 @@ using namespace Eigen;
 #define RC_DEADZONE_RPY 0.01
 #define RC_DEADZONE_THRUST 0.2
 
-#define RC_MAX_TILT_VEL 5.0
+#define RC_MAX_TILT_VEL 3.0
 #define RC_MAX_Z_VEL 2.0
 #define RC_MAX_YAW_RATE 1.57
 #define RC_MAX_TILT_ANGLE 0.52
 #define TAKEOFF_VEL_Z 2.0
-#define LANDING_VEL_Z -0.3
+#define LANDING_VEL_Z -0.2
 #define MAX_AUTO_Z_ERROR 0.05
 #define MIN_TAKEOFF_HEIGHT 0.5
 #define MIN_TRY_ARM_DURATION 1.0
@@ -69,6 +70,7 @@ class DroneCommander {
     ros::Subscriber flight_status_sub;
     ros::Subscriber ctrl_dev_sub;
     ros::Subscriber fc_att_sub;
+    ros::Subscriber bat_sub;
 
     ros::Timer loop_timer;
 
@@ -169,6 +171,7 @@ public:
         rc_sub = nh.subscribe("rc", 1, &DroneCommander::rc_callback, this, ros::TransportHints().tcpNoDelay());
         ctrl_dev_sub = nh.subscribe("control_device", 1, &DroneCommander::ctrl_dev_callback, this, ros::TransportHints().tcpNoDelay());
         fc_att_sub = nh.subscribe("fc_attitude", 1, &DroneCommander::fc_attitude_callback, this, ros::TransportHints().tcpNoDelay());
+        bat_sub = nh.subscribe("battery", 1, &DroneCommander::battery_callback, this,  ros::TransportHints().tcpNoDelay());
     }
 
     void vo_callback(const nav_msgs::Odometry & _odom);
@@ -178,6 +181,7 @@ public:
     void ctrl_dev_callback(const dji_sdk::ControlDevice & _ctrl_dev);
     void fc_attitude_callback(const geometry_msgs::QuaternionStamped & _quat);
     void loop(const ros::TimerEvent & _e);
+    void battery_callback(const sensor_msgs::BatteryState & _bat);
 
     bool is_odom_valid(const nav_msgs::Odometry & _odom);
     bool is_rc_valid(const sensor_msgs::Joy & _rc);
@@ -413,8 +417,19 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
         pose.orientation.x, pose.orientation.y, pose.orientation.z);
     Eigen::Vector3d rpy = quat2eulers(quat);
     yaw_vo = - rpy.z();
+
+    state.pos.x = pose.position.x;
+    state.pos.y = pose.position.y;
+    state.pos.z = pose.position.z;
+
+    state.vel.x = _odom.twist.twist.linear.x;
+    state.vel.y = _odom.twist.twist.linear.y;
+    state.vel.z = _odom.twist.twist.linear.z;
 }
 
+void DroneCommander::battery_callback(const sensor_msgs::BatteryState &_bat) {
+    state.bat_vol = _bat.voltage;
+}
 
 void DroneCommander::rc_callback(const sensor_msgs::Joy & _rc) {
     state.rc_valid = is_rc_valid(_rc);
