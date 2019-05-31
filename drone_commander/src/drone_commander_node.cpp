@@ -402,6 +402,12 @@ bool DroneCommander::check_control_auth() {
 
 void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     bool vo_valid = is_odom_valid(_odom);
+    //printf("VO valid %d", vo_valid);
+    auto pose = _odom.pose.pose;
+    Eigen::Quaterniond quat(pose.orientation.w, 
+        pose.orientation.x, pose.orientation.y, pose.orientation.z);
+    Eigen::Vector3d rpy = quat2eulers(quat);
+    yaw_vo = - rpy.z();
     if (!state.vo_valid && vo_valid) {
         //Vo first time come
         //reset yaw sp use vo yaw
@@ -412,6 +418,7 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
         odometry = _odom;
         last_vo_ts = _odom.header.stamp;
     }
+<<<<<<< HEAD
     auto pose = _odom.pose.pose;
     Eigen::Quaterniond quat(pose.orientation.w, 
         pose.orientation.x, pose.orientation.y, pose.orientation.z);
@@ -425,6 +432,8 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     state.vel.x = _odom.twist.twist.linear.x;
     state.vel.y = _odom.twist.twist.linear.y;
     state.vel.z = _odom.twist.twist.linear.z;
+=======
+>>>>>>> 8f33f212de426c7a97860896655cc2c6bfdb2fa5
 }
 
 void DroneCommander::battery_callback(const sensor_msgs::BatteryState &_bat) {
@@ -1066,6 +1075,7 @@ bool DroneCommander::is_odom_valid(const nav_msgs::Odometry & _odom) {
     }
 
     if ((ros::Time::now() - _odom.header.stamp).toSec() > MAX_VO_LATENCY ) {
+        ROS_WARN("Latency on odom!!!!!!!");
         return false;
     }
 

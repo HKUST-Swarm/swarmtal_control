@@ -274,6 +274,7 @@ def anaylze_csv(dataname, l=0, r=100000, plot=True):
 
 if __name__=="__main__":
     if len(sys.argv)> 1:
+<<<<<<< HEAD
         l = 0
         r = 1000000
         if len(sys.argv) > 2:
@@ -283,3 +284,6 @@ if __name__=="__main__":
             r = float(sys.argv[3])
 
         cd = anaylze_csv(sys.argv[1], l, r, plot=True)
+=======
+        cd = anaylze_csv(sys.argv[1], plot=True)
+>>>>>>> 8f33f212de426c7a97860896655cc2c6bfdb2fa5

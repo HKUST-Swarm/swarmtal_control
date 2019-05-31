@@ -89,7 +89,7 @@ def work(vo_topic="/vins_estimator/imu_propagate"):
         printBatteryLevel(bat_l, 100, prefix, suffix, length=10)
         r.sleep()
 
-        if rospy.get_time() - last_vo_time > 0.1:
+        if rospy.get_time() - last_vo_time > 0.2:
             vo_avail = False
     print()
 
@@ -99,7 +99,7 @@ if __name__ == "__main__":
             if len(sys.argv) > 1:
                 vo_topic = sys.argv[1]
             else:
-                vo_topic = "/vins_estimator/imu_propagate"
+                vo_topic = "/vins_estimator/odometry"
             work(vo_topic)
         else:
             print("[DRONE_STATUS][{}] Wait For rosmaster".format(time.time()))
