@@ -38,4 +38,7 @@ bool onboard_cmd_valid
 bool vo_valid
 bool djisdk_valid
 
+geometry_msgs/Point pos
+geometry_msgs/Point vel
+
 drone_pos_ctrl_cmd ctrl_cmd
