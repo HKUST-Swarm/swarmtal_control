@@ -12,6 +12,7 @@ import os, time
 from termcolor import colored
 from sensor_msgs.msg import BatteryState
 from geometry_msgs.msg import Point, Vector3
+from nav_msgs.msg import Odometry
 
 def printBatteryLevel (battery_level, total=100, prefix ='', suffix ='', length = 100, fill ='█'):
     """
@@ -56,36 +57,50 @@ def on_vo_msg(vo_msg):
     vo_position = vo_msg.pose.pose.position
     last_vo_time = rospy.get_time()
 
-def work():
+def battery_to_percent(bat):
+    if bat > 14.8:
+        return (bat - 14.8)/(16.8-14.8)*0.5+0.5
+    if 0<bat < 14.8:
+        return (bat-14.4)/(14.8-14.4)*0.5
+    return 0
+
+def work(vo_topic="/vins_estimator/imu_propagate"):
     global vo_avail, vo_position, last_vo_time, battery_votage
 
     rospy.init_node("drone_status")
-    s_bat = rospy.Subscriber("/dji_sdk_1/dji_sdk/battery_status", BatteryState, on_battery_status, 1)
+    s_bat = rospy.Subscriber("/dji_sdk_1/dji_sdk/battery_state", BatteryState, on_battery_status)
+    s_vo = rospy.Subscriber(vo_topic, Odometry, on_vo_msg)
     #Wait for dji_sdk
     rospy.loginfo("Wait for dji sdk.....")
     # rospy.wait_for_service("/dji_sdk_1/dji_sdk/set_hardsyc")
     rospy.loginfo("DJI SDK started")
     r = rospy.Rate(10)
-    while not rospy.is_shutdown():
+    while not rospy.is_shutdown() and rosgraph.is_master_online():
         prefix = "[{:7.3f}s]".format(rospy.get_time() % 1000)
         if vo_avail:
             vo_color = "green"
         else:
             vo_color = "red"
 
-        vo_str = " VO {} :[{:7.3f}, {:7.3f}, {:7.3f}]".format(vo_avail, vo_position.x, vo_position.y, vo_position.z)
+        vo_str = " VO {} :[{:5.3f}, {:5.3f}, {:5.3f}]".format(vo_avail, vo_position.x, vo_position.y, vo_position.z)
         prefix = prefix + colored(vo_str, vo_color) + " BAT:"
-        printBatteryLevel(battery_votage, 100, prefix, length=10)
+        bat_l = battery_to_percent(battery_votage) * 100
+        suffix = ":{:4.2f}V".format(battery_votage)
+        printBatteryLevel(bat_l, 100, prefix, suffix, length=10)
         r.sleep()
 
-        if rospy.get_time() - last_vo_time > 0.1:
+        if rospy.get_time() - last_vo_time > 0.2:
             vo_avail = False
     print()
 
 if __name__ == "__main__":
     while not rospy.is_shutdown():
         if rosgraph.is_master_online():
-            work()
+            if len(sys.argv) > 1:
+                vo_topic = sys.argv[1]
+            else:
+                vo_topic = "/vins_estimator/odometry"
+            work(vo_topic)
         else:
             print("[DRONE_STATUS][{}] Wait For rosmaster".format(time.time()))
             time.sleep(1.0)
