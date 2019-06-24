@@ -1013,7 +1013,7 @@ void DroneCommander::send_ctrl_cmd() {
 }
 
 void DroneCommander::prepare_control_hover() {
-    if (last_hover_count < control_count - 1 && this->state.control_auth == DCMD::CTRL_AUTH_THIS && state.is_armed && state.vo_valid ) {
+    if (last_hover_count < control_count - 1 && state.is_armed && state.vo_valid ) { // && this->state.control_auth == DCMD::CTRL_AUTH_THIS && state.is_armed && state.vo_valid ) {
         //Need to start new hover
 
         hover_pos.x() = odometry.pose.pose.position.x;
