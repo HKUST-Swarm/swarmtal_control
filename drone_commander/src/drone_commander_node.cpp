@@ -631,6 +631,11 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
 
             case OCMD::CTRL_LANDING_COMMAND: {
                 ROS_INFO("Onboard trying to Landing");
+                if (_cmd.param1 == 1) {
+                    state.landing_mode = DCMD::LANDING_MODE_ATT;
+                } else {
+                    state.landing_mode = DCMD::LANDING_MODE_XYVEL;
+                }
                 request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
                 break;
             }
@@ -947,7 +952,7 @@ void DroneCommander::process_control_landing() {
         request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
         ROS_INFO("Finsh landing, turn to IDLE");
     } else {
-        if (state.vo_valid) {
+        if (state.vo_valid && state.landing_mode == DCMD::LANDING_MODE_XYVEL) {
             set_vel_setpoint(0, 0, LANDING_VEL_Z);
         } else {
             set_att_setpoint(0 ,0, 0, LANDING_VEL_Z, true, false);
@@ -1020,7 +1025,7 @@ void DroneCommander::send_ctrl_cmd() {
 }
 
 void DroneCommander::prepare_control_hover() {
-    if (last_hover_count < control_count - 1 && this->state.control_auth == DCMD::CTRL_AUTH_THIS && state.is_armed && state.vo_valid ) {
+    if (last_hover_count < control_count - 1 && state.is_armed && state.vo_valid ) { // && this->state.control_auth == DCMD::CTRL_AUTH_THIS && state.is_armed && state.vo_valid ) {
         //Need to start new hover
 
         hover_pos.x() = odometry.pose.pose.position.x;
