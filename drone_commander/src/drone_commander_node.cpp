@@ -418,6 +418,8 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
         odometry = _odom;
         last_vo_ts = _odom.header.stamp;
     }
+
+    state.pos.x = pose.position.x;
     state.pos.y = pose.position.y;
     state.pos.z = pose.position.z;
 
@@ -918,21 +920,15 @@ void DroneCommander::process_control_takeoff() {
         return;
     }
 
-    if (state.vo_valid) {
-        if (is_in_air) {
-            //Already in air, process as a  posvel control
-            // set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
-            set_vel_setpoint(0, 0, TAKEOFF_VEL_Z);
+    if (is_in_air && state.vo_valid) {
+        //Already in air, process as a  posvel control
+        set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
+        
+        // ROS_INFO("Already in air, fly to %3.2lf %3.2lf %3.2lf", ctrl_cmd->pos_sp.x, ctrl_cmd->pos_sp.y, ctrl_cmd->pos_sp.z);
+    } else {
+        set_att_setpoint(0, 0, ctrl_cmd->yaw_sp, TAKEOFF_VEL_Z, true, false);
+    }
 
-            // ROS_INFO("Already in air, fly to %3.2lf %3.2lf %3.2lf", ctrl_cmd->pos_sp.x, ctrl_cmd->pos_sp.y, ctrl_cmd->pos_sp.z);
-        } else {
-            set_att_setpoint(0, 0, ctrl_cmd->yaw_sp, TAKEOFF_VEL_Z, true, false);
-        }
-        else {
-            ROS_WARN("VO failed; Takeoff do nothing");
-            request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
-        }
-    } 
 
 
     send_ctrl_cmd();

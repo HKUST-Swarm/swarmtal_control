@@ -186,7 +186,7 @@ public:
         if (pos_inited) {
             vel_sp.x() = float_constrain(px_con.control(pos_sp.x() - pos.x(), dt), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
             vel_sp.y() = float_constrain(py_con.control(pos_sp.y() - pos.y(), dt), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
-            vel_sp.z() = control_pos_z(pos_sp.z(), dt);
+            vel_sp.z() = float_constrain(control_pos_z(pos_sp.z(), dt), -MAX_VERTICAL_VEL, MAX_VERTICAL_VEL);
 
             if (param.ctrl_frame == VEL_BODY_ACC_BODY) {
                 vel_sp = quat.inverse() * vel_sp;

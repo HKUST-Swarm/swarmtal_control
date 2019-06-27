@@ -8,6 +8,6 @@
         <remap from="/drone_commander/sdk_control_authority" to="/dji_sdk_1/dji_sdk/sdk_control_authority"/>
         <remap from="/drone_commander/fc_attitude" to="/dji_sdk_1/dji_sdk/attitude"/>
         <remap from="/drone_commander/battery" to="/dji_sdk_1/dji_sdk/battery_state"/>
-        <param name="rc_fail_detection" type="bool" value="true" />
+        <param name="rc_fail_detection" type="bool" value="false" />
     </node>
 </launch>
