@@ -41,8 +41,9 @@ using namespace Eigen;
 #define DEFAULT_MAX_Z_VEL 3.0
 #define RC_MAX_YAW_RATE 1.57
 #define RC_MAX_TILT_ANGLE 0.52
-#define TAKEOFF_VEL_Z 2.0
+#define TAKEOFF_VEL_Z 1.0
 #define LANDING_VEL_Z -0.3
+#define LANDING_VEL_Z_EMERGENCY -1.0
 #define MAX_AUTO_Z_ERROR 0.05
 #define MAX_AUTO_TILT_ERROR 0.05
 #define MIN_TAKEOFF_HEIGHT 0.5
@@ -890,6 +891,20 @@ void DroneCommander::process_control_takeoff() {
     //TODO: write takeoff scirpt
     bool is_in_air = state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR;
     bool is_takeoff_finish = false;
+
+    if (state.control_auth != DCMD::CTRL_AUTH_THIS) {
+        //Abort takeoff
+        takeoff_inited = false;
+        request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
+        return;
+    }
+
+    if (!state.vo_valid) {
+        takeoff_inited = false;
+        request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
+        return;
+    }
+
     if (!state.is_armed) {
         ROS_INFO("Trying to takeoff but not armed. Try arm");
         try_arm(true);
@@ -962,9 +977,13 @@ void DroneCommander::process_control_landing() {
         ROS_INFO("Finsh landing, turn to IDLE");
     } else {
         if (state.vo_valid && state.landing_mode == DCMD::LANDING_MODE_XYVEL) {
-            set_vel_setpoint(0, 0, LANDING_VEL_Z);
+            if (state.pos.z > 0.3) {
+                set_vel_setpoint(0, 0, LANDING_VEL_Z);
+            } else {
+                set_att_setpoint(0 ,0, 0, LANDING_VEL_Z, true, false);
+            }
         } else {
-            set_att_setpoint(0 ,0, 0, LANDING_VEL_Z, true, false);
+            set_att_setpoint(0 ,0, 0, LANDING_VEL_Z_EMERGENCY, true, false);
         }
         send_ctrl_cmd();
     }

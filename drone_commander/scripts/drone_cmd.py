@@ -16,7 +16,7 @@ def send(cmd, args, pub):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='A easy command tool for sending command to swarm drone')
     parser.add_argument('command_type', metavar='command_type', choices=
-        ["takeoff", "landing", "flyto", "arm", "disarm", "joy_control", "circle", "sweep", "csv"], help="Type of command to send")
+        ["takeoff", "landing", "emland", "flyto", "arm", "disarm", "joy_control", "circle", "sweep", "csv"], help="Type of command to send")
     parser.add_argument("-c","--center", nargs=3, type=float, help="center for circle", default=[0, 0, 1])
     parser.add_argument("-r","--radius", type=float, help="radius for circle", default=0.5)
     parser.add_argument("-t","--cycle", type=float, help="cycle for circle or for sweep a cycle", default=30)
@@ -67,8 +67,13 @@ if __name__ == "__main__":
 
     elif args.command_type == "landing":
         cmd.command_type = drone_onboard_command.CTRL_LANDING_COMMAND
+        cmd.param1 = 0
         send(cmd, args, pub)
 
+    elif args.command_type == "emland":
+        cmd.command_type = drone_onboard_command.CTRL_LANDING_COMMAND
+        cmd.param1 = 1
+        send(cmd, args, pub)
 
     elif args.command_type == "arm":
         cmd.command_type = drone_onboard_command.CTRL_ARM_COMMAND
