@@ -934,12 +934,14 @@ void DroneCommander::process_control_takeoff() {
 
     if (is_in_air && state.vo_valid) {
         //Already in air, process as a  posvel control
-        ctrl_cmd->max_vel.z = 2.0;
+        ctrl_cmd->max_vel.z = TAKEOFF_VEL_Z;
         set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
         
         // ROS_INFO("Already in air, fly to %3.2lf %3.2lf %3.2lf", ctrl_cmd->pos_sp.x, ctrl_cmd->pos_sp.y, ctrl_cmd->pos_sp.z);
     } else {
-        // set_att_setpoint(0, 0, ctrl_cmd->yaw_sp, TAKEOFF_VEL_Z, true, false);
+        if (state.vo_valid) {
+            set_att_setpoint(0, 0, ctrl_cmd->yaw_sp, TAKEOFF_VEL_Z, true, false);            
+        }
     }
 
     send_ctrl_cmd();
