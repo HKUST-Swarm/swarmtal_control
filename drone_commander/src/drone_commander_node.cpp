@@ -37,11 +37,14 @@ using namespace Eigen;
 
 #define RC_MAX_TILT_VEL 3.0
 #define RC_MAX_Z_VEL 2.0
+#define DEFAULT_MAX_TITL_VEL 5.0
+#define DEFAULT_MAX_Z_VEL 3.0
 #define RC_MAX_YAW_RATE 1.57
 #define RC_MAX_TILT_ANGLE 0.52
-#define TAKEOFF_VEL_Z 1.5
+#define TAKEOFF_VEL_Z 2.0
 #define LANDING_VEL_Z -0.3
 #define MAX_AUTO_Z_ERROR 0.05
+#define MAX_AUTO_TILT_ERROR 0.05
 #define MIN_TAKEOFF_HEIGHT 0.5
 #define MIN_TRY_ARM_DURATION 1.0
 #define MAX_TRY_ARM_TIMES 5
@@ -216,6 +219,7 @@ public:
     void process_onboard_input();
 
     void reset_ctrl_cmd();
+    void reset_ctrl_cmd_max_vel();
     void reset_yaw_sp();
 
     void request_ctrl_mode(uint32_t req_ctrl_mode);
@@ -891,7 +895,14 @@ void DroneCommander::process_control_takeoff() {
         try_arm(true);
     }
     if (state.vo_valid) {
-        is_takeoff_finish = odometry.pose.pose.position.z  > (state.takeoff_target_height + takeoff_origin.z() - MAX_AUTO_Z_ERROR);
+        auto pos = odometry.pose.pose.position;
+        if (fabs(pos.x - takeoff_origin.x())< MAX_AUTO_TILT_ERROR && 
+            fabs(pos.y - takeoff_origin.y()) < MAX_AUTO_TILT_ERROR && 
+            fabs(pos.z - (takeoff_origin.z() + state.takeoff_target_height)) < MAX_AUTO_Z_ERROR) {
+            is_takeoff_finish = true;
+        } else {
+            is_takeoff_finish = false;
+        }
     } else {
         is_takeoff_finish = is_in_air;
     }
@@ -917,11 +928,13 @@ void DroneCommander::process_control_takeoff() {
         ROS_INFO("Finish takeoff, turn to hover....");
         request_ctrl_mode(DCMD::CTRL_MODE_HOVER);
         takeoff_inited = false;
+        reset_ctrl_cmd_max_vel();
         return;
     }
 
     if (is_in_air && state.vo_valid) {
         //Already in air, process as a  posvel control
+        ctrl_cmd->max_vel.z = 2.0;
         set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
         
         // ROS_INFO("Already in air, fly to %3.2lf %3.2lf %3.2lf", ctrl_cmd->pos_sp.x, ctrl_cmd->pos_sp.y, ctrl_cmd->pos_sp.z);
@@ -1060,6 +1073,15 @@ void DroneCommander::reset_ctrl_cmd() {
     ctrl_cmd->att_sp.z = 0;
     
     ctrl_cmd->z_sp = 0;
+
+    reset_ctrl_cmd_max_vel();
+    
+}
+
+void DroneCommander::reset_ctrl_cmd_max_vel() {
+    ctrl_cmd->max_vel.x = DEFAULT_MAX_TITL_VEL;
+    ctrl_cmd->max_vel.y = DEFAULT_MAX_TITL_VEL;
+    ctrl_cmd->max_vel.z = DEFAULT_MAX_Z_VEL;    
 }
 
 

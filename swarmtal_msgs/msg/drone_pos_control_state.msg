@@ -22,3 +22,5 @@ geometry_msgs/Vector3 pos_sp
 uint32 ctrl_mode
 
 uint64 count
+
+geometry_msgs/Vector3 max_vel

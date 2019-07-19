@@ -19,6 +19,7 @@ using namespace swarmtal_msgs;
 #define MAX_CMD_LOST_TIME 0.5f
 #define USE_DJI_THRUST_CTRL
 #define ANGULARRATE_MIX 0.9
+#define MAX_ACC 8 // max accerelation
 
 class DronePosControl {
     ros::NodeHandle & nh;
@@ -210,9 +211,9 @@ public:
         );
 
         //This is a FLU angular rate
-        angular_rate.x() = _imu.angular_velocity.x * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.x();
-        angular_rate.y() = _imu.angular_velocity.y * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.y();
-        angular_rate.z() = _imu.angular_velocity.z * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.z();
+        angular_rate.x() = _imu.angular_velocity.x;// * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.x();
+        angular_rate.y() = _imu.angular_velocity.y;// * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.y();
+        angular_rate.z() = _imu.angular_velocity.z;// * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.z();
         pos_ctrl->set_body_acc(acc);
 
         geometry_msgs::Quaternion quat = _imu.orientation;
@@ -301,6 +302,8 @@ public:
         state.ctrl_mode = _cmd.ctrl_mode;
 
         state.yaw_sp = _cmd.yaw_sp;
+
+        state.max_vel = _cmd.max_vel;
 
         last_cmd_ts = ros::Time::now();
     }
@@ -433,7 +436,10 @@ public:
         
         if (state.ctrl_mode < drone_pos_ctrl_cmd::CTRL_CMD_ATT_THRUST_MODE) {
             if (state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_POS_MODE) {
-                vel_sp = pos_ctrl->control_pos(pos_sp, dt) + vel_ff; 
+                vel_sp = pos_ctrl->control_pos(pos_sp, dt) + vel_ff;
+                vel_sp.x() = float_constrain(vel_sp.x(), -state.max_vel.x, state.max_vel.x);
+                vel_sp.y() = float_constrain(vel_sp.y(), -state.max_vel.y, state.max_vel.y);
+                vel_sp.z() = float_constrain(vel_sp.z(), -state.max_vel.z, state.max_vel.z);
             }
             
             acc_sp = pos_ctrl->control_vel(vel_sp, dt);
@@ -446,9 +452,9 @@ public:
             yaw_cmd.yaw_mode = YAW_MODE_LOCK;
             yaw_cmd.yaw_sp = state.yaw_sp;
 
-            acc_sp.x() = float_constrain(acc_sp.x(), -10, 10);
-            acc_sp.y() = float_constrain(acc_sp.y(), -10, 10);
-            acc_sp.z() = float_constrain(acc_sp.z(), -10, 10);
+            acc_sp.x() = float_constrain(acc_sp.x(), -MAX_ACC, MAX_ACC);
+            acc_sp.y() = float_constrain(acc_sp.y(), -MAX_ACC, MAX_ACC);
+            acc_sp.z() = float_constrain(acc_sp.z(), -MAX_ACC, MAX_ACC);
 
 
             atti_out =  pos_ctrl->control_acc(acc_sp, yaw_cmd, dt, odom_att_rpy.z());
