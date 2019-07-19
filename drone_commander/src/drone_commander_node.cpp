@@ -939,10 +939,8 @@ void DroneCommander::process_control_takeoff() {
         
         // ROS_INFO("Already in air, fly to %3.2lf %3.2lf %3.2lf", ctrl_cmd->pos_sp.x, ctrl_cmd->pos_sp.y, ctrl_cmd->pos_sp.z);
     } else {
-        set_att_setpoint(0, 0, ctrl_cmd->yaw_sp, TAKEOFF_VEL_Z, true, false);
+        // set_att_setpoint(0, 0, ctrl_cmd->yaw_sp, TAKEOFF_VEL_Z, true, false);
     }
-
-
 
     send_ctrl_cmd();
 }
