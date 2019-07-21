@@ -51,6 +51,8 @@ using namespace Eigen;
 #define MAX_TRY_ARM_TIMES 5
 
 #define MAX_LOSS_ONBOARD_CMD 1.0
+#define LANDING_ATT_MODE_HEIGHT 0.3
+#define LANDING_ATT_MIN_HEIGHT 0.1
 
 #define LOOP_DURATION 0.02
 
@@ -633,6 +635,7 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
 
                 request_ctrl_mode(DCMD::CTRL_MODE_TAKEOFF);
                 state.takeoff_target_height = h;
+                state.takeoff_velocity = ((double)_cmd.param1) / 10000.0;
                 break;
             };
 
@@ -643,6 +646,9 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
                 } else {
                     state.landing_mode = DCMD::LANDING_MODE_XYVEL;
                 }
+
+                state.landing_velocity = -((double)_cmd.param2) / 10000.0;
+
                 request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
                 break;
             }
@@ -949,13 +955,13 @@ void DroneCommander::process_control_takeoff() {
 
     if (is_in_air && state.vo_valid) {
         //Already in air, process as a  posvel control
-        ctrl_cmd->max_vel.z = TAKEOFF_VEL_Z;
+        ctrl_cmd->max_vel.z = state.takeoff_velocity;
         set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
         
         // ROS_INFO("Already in air, fly to %3.2lf %3.2lf %3.2lf", ctrl_cmd->pos_sp.x, ctrl_cmd->pos_sp.y, ctrl_cmd->pos_sp.z);
     } else {
         if (state.vo_valid) {
-            set_att_setpoint(0, 0, ctrl_cmd->yaw_sp, TAKEOFF_VEL_Z, true, false);            
+            set_att_setpoint(0, 0, ctrl_cmd->yaw_sp, state.takeoff_velocity, true, false);            
         }
     }
 
@@ -969,21 +975,19 @@ void DroneCommander::process_control_landing() {
     bool is_landing_finish = state.flight_status < DCMD::FLIGHT_STATUS_IN_AIR;
 
     if (is_landing_finish) {
-        if (state.flight_status == DCMD::FLIGHT_STATUS_ARMED) {
-            ROS_INFO("Landed, request disarm");
-            try_arm(false);
-        }
         request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
         ROS_INFO("Finsh landing, turn to IDLE");
     } else {
         if (state.vo_valid && state.landing_mode == DCMD::LANDING_MODE_XYVEL) {
-            if (state.pos.z > 0.3) {
-                set_vel_setpoint(0, 0, LANDING_VEL_Z);
+            if (state.pos.z > LANDING_ATT_MODE_HEIGHT) {
+                set_vel_setpoint(0, 0, state.landing_velocity);
             } else {
-                set_att_setpoint(0 ,0, 0, LANDING_VEL_Z, true, false);
+                state.landing_mode = DCMD::LANDING_MODE_ATT;
+                set_att_setpoint(0 ,0, 0, state.landing_velocity, true, false);
             }
+
         } else {
-            set_att_setpoint(0 ,0, 0, LANDING_VEL_Z_EMERGENCY, true, false);
+            set_att_setpoint(0 ,0, 0, state.landing_velocity, true, false);
         }
         send_ctrl_cmd();
     }

@@ -68,11 +68,13 @@ if __name__ == "__main__":
     elif args.command_type == "landing":
         cmd.command_type = drone_onboard_command.CTRL_LANDING_COMMAND
         cmd.param1 = 0
+        cmd.param2 = 3000
         send(cmd, args, pub)
 
     elif args.command_type == "emland":
         cmd.command_type = drone_onboard_command.CTRL_LANDING_COMMAND
         cmd.param1 = 1
+        cmd.param2 = 10000
         send(cmd, args, pub)
 
     elif args.command_type == "arm":

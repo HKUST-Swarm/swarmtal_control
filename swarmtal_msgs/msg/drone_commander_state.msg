@@ -19,6 +19,7 @@ uint32 CTRL_AUTH_THIS = 2
 uint32 control_auth
 
 float64 takeoff_target_height
+float64 takeoff_velocity
 
 #0 vo landing
 #1 zero attitude landing
@@ -27,6 +28,7 @@ uint32 LANDING_MODE_XYVEL = 0
 uint32 LANDING_MODE_ATT = 1
 
 uint32 landing_mode
+float64 landing_velocity
 
 uint32 CTRL_MODE_IDLE=0
 uint32 CTRL_MODE_TAKEOFF=1
