@@ -50,7 +50,7 @@ using namespace Eigen;
 #define MIN_TRY_ARM_DURATION 1.0
 #define MAX_TRY_ARM_TIMES 5
 
-#define MAX_LOSS_ONBOARD_CMD 1.0
+#define MAX_LOSS_ONBOARD_CMD 3.0
 #define LANDING_ATT_MODE_HEIGHT 0.3
 #define LANDING_ATT_MIN_HEIGHT 0.1
 
@@ -64,6 +64,33 @@ using namespace Eigen;
 #define DCMD drone_commander_state
 #define OCMD drone_onboard_command
 #define DPCL drone_pos_ctrl_cmd
+
+inline double float_constrain(double v, double min, double max)
+{
+    if (v < min) {
+        return min;
+    }
+    if (v > max) {
+        return max;
+    }
+    return v;
+}
+
+
+double expo(const double &value, const double &e)
+{
+	double x = float_constrain(value, - 1, 1);
+	double ec = float_constrain(e, 0, 1);
+	return (1 - ec) * x + ec * x * x * x;
+}
+
+const double superexpo(const double &value, double e = 0.5, double g = 0.5)
+{
+	double x = float_constrain(value, - 1, 1);
+	double gc = float_constrain(g, 0, 0.99);
+	return expo(x, e) * (1 - gc) / (1 - fabsf(x) * gc);
+}
+
 
 inline Eigen::Vector3d quat2eulers(Eigen::Quaterniond quat);
 class DroneCommander {
@@ -156,6 +183,7 @@ public:
         } else {
             ROS_INFO("Will NOT detect RC fail");
         }
+        reset_ctrl_cmd_max_vel();
     }
 
     void init_states() {
@@ -433,6 +461,7 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     state.vel.x = _odom.twist.twist.linear.x;
     state.vel.y = _odom.twist.twist.linear.y;
     state.vel.z = _odom.twist.twist.linear.z;
+    state.yaw = yaw_vo;
 }
 
 void DroneCommander::battery_callback(const sensor_msgs::BatteryState &_bat) {
@@ -635,7 +664,7 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
 
                 request_ctrl_mode(DCMD::CTRL_MODE_TAKEOFF);
                 state.takeoff_target_height = h;
-                state.takeoff_velocity = ((double)_cmd.param1) / 10000.0;
+                state.takeoff_velocity = ((double)_cmd.param2) / 10000.0;
                 break;
             };
 
@@ -999,7 +1028,12 @@ void DroneCommander::request_ctrl_mode(uint32_t req_ctrl_mode) {
     // ROS_INFO("Request %d", req_ctrl_mode);
     switch (req_ctrl_mode) {
         case DCMD::CTRL_MODE_LANDING: {
-            state.commander_ctrl_mode = req_ctrl_mode;
+            if (state.flight_status < state.FLIGHT_STATUS_IN_AIR) {
+                //Not in air; goto IDLE
+                state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+            } else {
+                state.commander_ctrl_mode = req_ctrl_mode;
+            }
             return;
             break;
         }
@@ -1015,6 +1049,11 @@ void DroneCommander::request_ctrl_mode(uint32_t req_ctrl_mode) {
         case DCMD::CTRL_MODE_MISSION:
         case DCMD::CTRL_MODE_HOVER:
         case DCMD::CTRL_MODE_POSVEL:{
+            if (state.flight_status < state.FLIGHT_STATUS_IN_AIR) {
+                //Not in air; goto IDLE
+                state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+            }
+
             if (state.vo_valid) {
                 state.commander_ctrl_mode = req_ctrl_mode;
             } else {
@@ -1029,7 +1068,13 @@ void DroneCommander::request_ctrl_mode(uint32_t req_ctrl_mode) {
         
         default:
         case DCMD::CTRL_MODE_ATT: {
-            state.commander_ctrl_mode = req_ctrl_mode;
+            if (state.flight_status < state.FLIGHT_STATUS_IN_AIR) {
+                //Not in air; goto IDLE
+                state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+            } else {
+                state.commander_ctrl_mode = req_ctrl_mode;
+            }
+            
             break;
         }
     }
