@@ -798,10 +798,10 @@ void DroneCommander::process_rc_input () {
     double z = 0;
 
     if (state.rc_valid) {
-        y = - rc.axes[0];
-        x = rc.axes[1];
-        r = rc.axes[2];
-        z = rc.axes[3];
+        y = - superexpo(rc.axes[0]) ;
+        x = superexpo(rc.axes[1]);
+        r = superexpo(rc.axes[2]);
+        z = superexpo(rc.axes[3]);
     }
 
 
