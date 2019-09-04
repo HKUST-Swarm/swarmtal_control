@@ -65,6 +65,8 @@ using namespace Eigen;
 #define OCMD drone_onboard_command
 #define DPCL drone_pos_ctrl_cmd
 
+#define DANGER_SPEED_HOVER 0.5
+
 inline double float_constrain(double v, double min, double max)
 {
     if (v < min) {
@@ -289,7 +291,7 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
     }
 
 
-    if (count ++ % 100 == 0)
+    if (count ++ % 10 == 0)
     {
 #ifdef DEBUG_OUTPUT
         if (rc.axes.size() >= 6)
@@ -303,10 +305,13 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
              rc.axes[5]
         );
 
-        ROS_INFO("POS     %3.2f      %3.2f     %3.2f \nctrl_input_state %d, flight_status %d\n control_auth %d  ctrl_mode %d, is_armed %d\n rc_valid %d onboard_cmd_valid %d vo_valid%d sdk_valid %d ",
-	    odometry.pose.pose.position.x,
-	    odometry.pose.pose.position.y,
-	    odometry.pose.pose.position.z,
+        ROS_INFO("POS     %3.2f      %3.2f     %3.2f TGT %3.2f %3.2f %3.2f\nctrl_input_state %d, flight_status %d\n control_auth %d  ctrl_mode %d, is_armed %d\n rc_valid %d onboard_cmd_valid %d vo_valid%d sdk_valid %d ",
+    	    odometry.pose.pose.position.x,
+	        odometry.pose.pose.position.y,
+	        odometry.pose.pose.position.z,
+            ctrl_cmd->pos_sp.x,
+            ctrl_cmd->pos_sp.y,
+            ctrl_cmd->pos_sp.z,
             state.ctrl_input_state,
             state.flight_status,
             state.control_auth,
@@ -866,8 +871,10 @@ void DroneCommander::process_onboard_input () {
 void DroneCommander::process_control() {
     //control_count ++;
 
-    if (state.control_auth != DCMD::CTRL_AUTH_THIS)
+    if (state.control_auth != DCMD::CTRL_AUTH_THIS) {
+        state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
         return;
+    }
 
     
     switch (state.commander_ctrl_mode) {
@@ -1102,6 +1109,7 @@ void DroneCommander::send_ctrl_cmd() {
 }
 
 void DroneCommander::prepare_control_hover() {
+    bool ok_to_hover = false;
     if (last_hover_count < control_count - 1 && state.is_armed && state.vo_valid ) { // && this->state.control_auth == DCMD::CTRL_AUTH_THIS && state.is_armed && state.vo_valid ) {
         //Need to start new hover
 
@@ -1116,9 +1124,18 @@ void DroneCommander::prepare_control_hover() {
             last_hover_count,
             control_count
         );
+
+        ok_to_hover = true;
     }
 
-    set_pos_setpoint(hover_pos.x(), hover_pos.y(), hover_pos.z());
+    if (ok_to_hover) {
+        set_pos_setpoint(hover_pos.x(), hover_pos.y(), hover_pos.z());
+    } else {
+        ROS_INFO("Onboard trying to Landing because try to hover failed");
+        state.landing_mode = DCMD::LANDING_MODE_ATT;       
+        state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
+        request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
+    }
 
 
     last_hover_count = control_count;
