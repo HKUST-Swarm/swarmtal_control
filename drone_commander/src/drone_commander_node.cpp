@@ -65,7 +65,7 @@ using namespace Eigen;
 #define OCMD drone_onboard_command
 #define DPCL drone_pos_ctrl_cmd
 
-#define DANGER_SPEED_HOVER 0.5
+#define DANGER_SPEED_HOVER (RC_MAX_TILT_VEL+0.5)
 
 inline double float_constrain(double v, double min, double max)
 {
@@ -780,6 +780,11 @@ void DroneCommander::process_input_source () {
 
 
 void DroneCommander::process_rc_input () {
+    if (state.control_auth != DCMD::CTRL_AUTH_THIS) {
+        state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+        return;
+    }
+    
     //Force RC control velocity
     if (rc_moving_stick()) {
         request_ctrl_mode(DCMD::CTRL_MODE_POSVEL);
@@ -853,6 +858,7 @@ void DroneCommander::process_none_input () {
 
 void DroneCommander::process_control_idle() {
     //Landing and disarm
+    /*
     if (state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) {
         request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
         process_control_landing();
@@ -860,7 +866,7 @@ void DroneCommander::process_control_idle() {
         if (state.is_armed) {
             this->try_arm(false);
         }
-    }
+    }*/
 }
 
 void DroneCommander::process_onboard_input () {
@@ -1109,7 +1115,7 @@ void DroneCommander::send_ctrl_cmd() {
 }
 
 void DroneCommander::prepare_control_hover() {
-    bool ok_to_hover = false;
+    bool fail_to_hover = false;
     if (last_hover_count < control_count - 1 && state.is_armed && state.vo_valid ) { // && this->state.control_auth == DCMD::CTRL_AUTH_THIS && state.is_armed && state.vo_valid ) {
         //Need to start new hover
 
@@ -1117,26 +1123,30 @@ void DroneCommander::prepare_control_hover() {
         hover_pos.y() = odometry.pose.pose.position.y;
         hover_pos.z() = odometry.pose.pose.position.z;
 
-        ROS_INFO("Entering hover mode, will hover at %3.2lf %3.2lf %3.2lf h %d c %d",
-            hover_pos.x(),
-            hover_pos.y(),
-            hover_pos.z(),
-            last_hover_count,
-            control_count
-        );
-
-        ok_to_hover = true;
+        if (fabs(odometry.twist.twist.linear.x) > DANGER_SPEED_HOVER ||
+            fabs(odometry.twist.twist.linear.x) > DANGER_SPEED_HOVER ||
+            fabs(odometry.twist.twist.linear.x) > DANGER_SPEED_HOVER) {
+            fail_to_hover = true;
+        } else {
+            ROS_INFO("Entering hover mode, will hover at %3.2lf %3.2lf %3.2lf h %d c %d",
+                hover_pos.x(),
+                hover_pos.y(),
+                hover_pos.z(),
+                last_hover_count,
+                control_count
+            );
+            set_pos_setpoint(hover_pos.x(), hover_pos.y(), hover_pos.z());
+        }
     }
 
-    if (ok_to_hover) {
-        set_pos_setpoint(hover_pos.x(), hover_pos.y(), hover_pos.z());
-    } else {
-        ROS_INFO("Onboard trying to Landing because try to hover failed");
-        state.landing_mode = DCMD::LANDING_MODE_ATT;       
-        state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
-        request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
+    if (fail_to_hover) {
+        if (state.is_armed) {
+            ROS_INFO("Onboard trying to Landing because try to hover failed");
+            state.landing_mode = DCMD::LANDING_MODE_ATT;       
+            state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
+            request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
+        }
     }
-
 
     last_hover_count = control_count;
 }
@@ -1179,10 +1189,11 @@ bool DroneCommander::is_odom_valid(const nav_msgs::Odometry & _odom) {
         return false;
     }
 
+    /*
     if ((ros::Time::now() - _odom.header.stamp).toSec() > MAX_VO_LATENCY ) {
         ROS_WARN("Latency on odom!!!!!!!");
         return false;
-    }
+    }*/
 
     return true;
 }
