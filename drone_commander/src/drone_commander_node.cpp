@@ -456,7 +456,8 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     state.vo_valid = vo_valid;
     if (state.vo_valid) {
         odometry = _odom;
-        last_vo_ts = _odom.header.stamp;
+        //FIX vo lost due to time align
+        last_vo_ts = ros::Time::now();
     }
 
     state.pos.x = pose.position.x;
