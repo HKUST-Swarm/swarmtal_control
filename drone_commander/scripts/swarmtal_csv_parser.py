@@ -42,6 +42,7 @@ def parse_csv_data(csv_path, lt=0, rt=1000000):
     attout rpy 20:23
     thrsp 24
     """
+    print(data.shape)
     ans["ts"] = data[l:r,0]
     ans["ctrl_mode"] = data[l:r,1]
     ans['pos'] = data[l:r,2:5]
@@ -52,7 +53,9 @@ def parse_csv_data(csv_path, lt=0, rt=1000000):
     ans['acc_sp'] = data[l:r,17:20]
     ans["rpy_sp"] = data[l:r,20:23]
     ans["thr_sp"] = data[l:r,23]
-    ans['rpy_fc'] = data[l:r,24:26]
+    ans['rpy_fc'] = data[l:r,24:27]
+    ans['ang_vel'] = data[l:r,27:30]
+    ans['acc'] = data[l:r,30:33]
     return ans
 
 def anaylze_csv(dataname, l=0, r=100000, plot=True):
@@ -101,8 +104,8 @@ def anaylze_csv(dataname, l=0, r=100000, plot=True):
         fig = plt.figure("PosXYXZ")
         ax = fig.add_subplot(121)
     #     plt.title("Position XZ Following")
-        ax.plot(csv_data['pos'][:,0], -csv_data['pos'][:,2], label='real')
-        ax.plot(csv_data['pos_sp'][:,0], -csv_data['pos_sp'][:,2], label='sp')
+        ax.plot(csv_data['pos'][:,0], csv_data['pos'][:,2], label='real')
+        ax.plot(csv_data['pos_sp'][:,0], csv_data['pos_sp'][:,2], label='sp')
         ax.legend(loc='lower right')
         ax.grid(which="both")
         plt.xlabel("X (m)")    
@@ -230,6 +233,7 @@ def anaylze_csv(dataname, l=0, r=100000, plot=True):
         plt.figure("Acc")
         plt.subplot(221)
         plt.plot(_t, csv_data['acc_sp'][:,0] , label="$a_x$_cmd")
+        plt.plot(_t, csv_data['acc'][:,0] , label="$a_x$")
         plt.legend(loc='upper right')
         plt.grid(which="both")
         plt.setp(ax.get_xticklabels(), visible=False)
@@ -238,7 +242,8 @@ def anaylze_csv(dataname, l=0, r=100000, plot=True):
         plt.subplot(222)
     #     plt.title("Acc Y")        
 
-        plt.plot(_t, csv_data['acc_sp'][:,1], label="$a_y$_cmd")
+        plt.plot(_t, csv_data['acc_sp'][:,1], label="$a_y$ cmd")
+        plt.plot(_t, csv_data['acc'][:,1], label="$a_y$")
         plt.setp(ax.get_xticklabels(), visible=False)
         plt.ylabel("($m/s^2$)")
 
@@ -248,7 +253,8 @@ def anaylze_csv(dataname, l=0, r=100000, plot=True):
         plt.subplot(223)
     #     plt.title("Acc Z")        
 
-        plt.plot(_t, csv_data['acc_sp'][:,2], label="$a_z$_cmd")
+        plt.plot(_t, csv_data['acc_sp'][:,2], label="$a_z$cmd")
+        plt.plot(_t, csv_data['acc'][:,2], label="$a_z$")
         plt.ylabel("($m/s^2$)")
 
     #     plt.ylim(-2, 5)
@@ -257,15 +263,13 @@ def anaylze_csv(dataname, l=0, r=100000, plot=True):
         plt.grid(which="both")
         plt.xlabel("Time (s)")
 
-        """
-        plt.subplot(224)
-        plt.plot(_t, csv_data["acc"][:,2], 'o', label="ABX_actual")
-        plt.plot(_t, csv_data['pry_abx_cmd'][:,3], label="ABX_cmd")
-        plt.legend(loc='upper right')
-        plt.grid(which="both")
-        plt.xlabel("Time (s)")
-        plt.ylabel("($m/s^2$)")
-        """
+        # plt.subplot(224)
+        # plt.plot(_t, csv_data["acc"][:,2], 'o', label="ABX_actual")
+        # plt.plot(_t, csv_data['pry_abx_cmd'][:,3], label="ABX_cmd")
+        # plt.legend(loc='upper right')
+        # plt.grid(which="both")
+        # plt.xlabel("Time (s)")
+        # plt.ylabel("($m/s^2$)")
 
         plt.show()
     

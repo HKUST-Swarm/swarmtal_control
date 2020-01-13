@@ -156,7 +156,7 @@ public:
         this->calc_pid(x);
         // printf("V is %2.1f, PID %3.1f %3.1f %3.1f\n", x, param.p, param.i, param.d);
 
-        PIDController::control(err, dt, report);
+        return PIDController::control(err, dt, report);
     }
 
 };
