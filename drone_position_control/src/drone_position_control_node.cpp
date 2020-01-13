@@ -501,8 +501,8 @@ public:
 
 #ifdef YAW_RATE_MODE
             ROS_INFO("Yaw odom %f", yaw_odom*57.3);
-            //Yaw sp is given in NED
-            double err = -yaw_cmd.yaw_sp - yaw_odom;
+            //Yaw sp is given in ENU
+            double err = yaw_cmd.yaw_sp - (-yaw_odom);
             atti_out.yaw_sp = - yaw_ctrl->control(err, dt);
 #endif
             if (state.count % 50 == 0)
@@ -541,7 +541,7 @@ public:
 
 #ifdef YAW_RATE_MODE
             ROS_INFO("Yaw odom %f", yaw_odom*57.3);
-            double err = rpy.z() - yaw_odom;
+            double err = rpy.z() - (-yaw_odom);
             atti_out.yaw_sp = - yaw_ctrl->control(err, dt);
 #endif
 
