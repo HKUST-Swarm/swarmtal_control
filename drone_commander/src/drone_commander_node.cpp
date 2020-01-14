@@ -31,14 +31,14 @@ using namespace Eigen;
 #define MAX_LOSS_SDK 0.1f
 #define MAX_ODOM_VELOCITY 25.0f
 
-#define RC_DEADZONE_RPY 0.01
-#define RC_DEADZONE_THRUST 0.2
+#define RC_DEADZONE_RPY 1.0
+#define RC_DEADZONE_THRUST 1.0
 
 #define RC_MAX_TILT_VEL 3.0
 #define RC_MAX_Z_VEL 2.0
 #define DEFAULT_MAX_TITL_VEL 5.0
 #define DEFAULT_MAX_Z_VEL 3.0
-#define RC_MAX_YAW_RATE 1.57
+#define RC_MAX_YAW_RATE 2.0
 #define RC_MAX_TILT_ANGLE 0.52
 #define TAKEOFF_VEL_Z 1.0
 #define LANDING_VEL_Z -0.3
@@ -386,7 +386,7 @@ void DroneCommander::try_arm(bool arm) {
         // TODO:
         // rosservice call /dji_sdk_1/dji_sdk/drone_arm_control "arm: 0"
         arm_srv.request.arm = arm;
-        ros::service::call("/dji_sdk_1/dji_sdk/drone_arm_control", arm_srv);
+        ros::service::call("drone_arm_control", arm_srv);
         ROS_INFO("Try arm success %d", arm_srv.response.result);
         // if *
         if (!arm_srv.response.result) {
@@ -396,7 +396,7 @@ void DroneCommander::try_arm(bool arm) {
     }
     if (state.djisdk_valid && ! arm) {
         arm_srv.request.arm = arm;
-        ros::service::call("/dji_sdk_1/dji_sdk/drone_arm_control", arm_srv);
+        ros::service::call("drone_arm_control", arm_srv);
         ROS_INFO("Try DIsarm success %d", arm_srv.response.result);
         // if *
         if (!arm_srv.response.result) {

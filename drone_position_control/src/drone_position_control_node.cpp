@@ -158,8 +158,8 @@ public:
         ROS_INFO("Pos control success");
 
         PIDParam _param_yaw;
-        _param_yaw.p = 1.0;
-        _param_yaw.i = 0.2;
+        _param_yaw.p = 6.0;
+        _param_yaw.i = 0.1;
         _param_yaw.max_err_i = 1.0;
         yaw_ctrl = new PIDController(_param_yaw);
 
@@ -178,6 +178,18 @@ public:
 
         start_time = last_cmd_ts = ros::Time::now();
     }   
+
+    double yaw_control(YawCMD yaw_cmd, double dt) {
+#ifdef FCHardware == AIRSIM
+        ROS_INFO("Yaw odom %f", yaw_odom*57.3);
+        //Yaw sp is given in ENU
+        double err = yaw_cmd.yaw_sp - (yaw_odom);
+        err = constrainAngle(err);
+        atti_out.yaw_sp = yaw_ctrl->control(err, dt);
+#else
+        atti_out.yaw_sp = yaw_cmd.yaw_sp;
+#endif
+    }
 
     void init_log_file() {
         time_t rawtime;
@@ -499,12 +511,8 @@ public:
             atti_out.thrust_sp = thrust_sp;
 #endif
 
-#ifdef YAW_RATE_MODE
-            ROS_INFO("Yaw odom %f", yaw_odom*57.3);
-            //Yaw sp is given in ENU
-            double err = yaw_cmd.yaw_sp - (-yaw_odom);
-            atti_out.yaw_sp = - yaw_ctrl->control(err, dt);
-#endif
+            atti_out.yaw_sp = yaw_control(yaw_cmd, dt);
+
             if (state.count % 50 == 0)
             {
                 ROS_INFO("Mode %d Possp/pos %3.2f %3.2f %3.2f/ %3.2f %3.2f %3.2f",
@@ -538,12 +546,11 @@ public:
             atti_out.pitch_sp = rpy.y();
             atti_out.yaw_sp = rpy.z();
             atti_out.thrust_sp = z_sp;
+            YawCMD yaw_cmd;
+            yaw_cmd.yaw_sp = rpy.z();
+                // yaw_cmd.yaw_mode = YAW_ANGLE;
+            atti_out.yaw_sp = yaw_control(yaw_cmd, dt);
 
-#ifdef YAW_RATE_MODE
-            ROS_INFO("Yaw odom %f", yaw_odom*57.3);
-            double err = rpy.z() - (-yaw_odom);
-            atti_out.yaw_sp = - yaw_ctrl->control(err, dt);
-#endif
 
             if (state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_ATT_VELZ_MODE) {
                 atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_VELZ;
