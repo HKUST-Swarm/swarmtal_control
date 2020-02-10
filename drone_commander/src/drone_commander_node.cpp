@@ -1,9 +1,3 @@
-#define PX4 0 
-#define DJI_SDK 1
-// #define FCHardware DJI_SDK
-// #define FCHardware PX4
-#define FCHardware AIRSIM
-
 #include <ros/ros.h>
 #include <swarmtal_msgs/drone_pos_ctrl_cmd.h>
 #include <swarmtal_msgs/drone_onboard_command.h>

@@ -17,7 +17,6 @@
 
 using namespace swarmtal_msgs;
 #define MAX_CMD_LOST_TIME 0.5f
-#define FCHardware AIRSIM
 
 // #define USE_DJI_THRUST_CTRL
 #define YAW_RATE_MODE
