@@ -19,7 +19,9 @@ using namespace swarmtal_msgs;
 #define MAX_CMD_LOST_TIME 0.5f
 
 // #define USE_DJI_THRUST_CTRL
+#if FCHardware == AIRSIM
 #define YAW_RATE_MODE
+#endif
 
 #define ANGULARRATE_MIX 0.9
 #define MAX_ACC 8 // max accerelation
@@ -180,7 +182,7 @@ public:
 
     double yaw_control(YawCMD yaw_cmd, double dt) {
 #ifdef FCHardware == AIRSIM
-        ROS_INFO("Yaw odom %f", yaw_odom*57.3);
+        // ROS_INFO("Yaw odom %f", yaw_odom*57.3);
         //Yaw sp is given in ENU
         double err = yaw_cmd.yaw_sp - (yaw_odom);
         err = constrainAngle(err);
@@ -438,12 +440,10 @@ public:
         dji_command_so3.axes.push_back(atti_out.roll_sp);       // x
         dji_command_so3.axes.push_back(atti_out.pitch_sp);       // y
         if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_THRUST) {
-/*            
 #if FCHardware == DJI_SDK
             atti_out.thrust_sp = float_constrain(atti_out.thrust_sp, 0, 1.0);
             dji_command_so3.axes.push_back(atti_out.thrust_sp*100); // z
 #endif
-*/
 #if FCHardware == AIRSIM
             atti_out.thrust_sp = float_constrain(atti_out.thrust_sp, 0, 1.0);
             printf("THRUST SP %f\n", atti_out.thrust_sp);
