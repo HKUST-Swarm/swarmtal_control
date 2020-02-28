@@ -67,6 +67,11 @@ using namespace Eigen;
 
 #define DANGER_SPEED_HOVER (RC_MAX_TILT_VEL+0.5)
 
+#define BATTERY_REMAIN_CUTOFF 240.0f
+#define BATTERY_REMAIN_PARAM_A 345.375f 
+#define BATTERY_REMAIN_PARAM_B -4757.3f
+#define LANDING_VEL_Z_BATTERY_LOW -1.0
+
 inline double float_constrain(double v, double min, double max)
 {
     if (v < min) {
@@ -146,6 +151,8 @@ class DroneCommander {
     bool yaw_sp_inited = false;
 
     bool rc_fail_detection = true;
+
+    double battery_life = 600.0f;
 
 public:
     DroneCommander(ros::NodeHandle & _nh):
@@ -470,8 +477,38 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     state.yaw = yaw_vo;
 }
 
+inline double lowpass_filter(double input, double fc, double outputlast, double dt) {
+	double RC = 1.0 / (fc *2 * M_PI);
+	double alpha = dt / (RC + dt);
+	return outputlast + (alpha* (input - outputlast));
+}
+
 void DroneCommander::battery_callback(const sensor_msgs::BatteryState &_bat) {
     state.bat_vol = _bat.voltage;
+
+    double battery_life_tmp = BATTERY_REMAIN_PARAM_A * state.bat_vol + BATTERY_REMAIN_PARAM_B;
+
+    // if ((battery_life - battery_life_tmp) > 60)
+    //     battery_life = battery_life - 60;
+    // else if ((battery_life - battery_life_tmp) < -60)
+    //     battery_life = battery_life + 60;
+    // else
+    //     battery_life = BATTERY_REMAIN_PARAM_A* state.bat_vol + BATTERY_REMAIN_PARAM_B;
+
+    state.bat_remain = lowpass_filter(battery_life_tmp, 2 , state.bat_remain, 0.1);
+
+    ROS_INFO("Battery Level: %3.2f, Left Time: %3.2f", state.bat_vol, state.bat_remain);
+
+    if (state.bat_remain <= BATTERY_REMAIN_CUTOFF &&
+        state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) {
+        ROS_INFO("Battery Low, Landing");
+        state.landing_mode = DCMD::LANDING_MODE_ATT;
+        state.landing_velocity = LANDING_VEL_Z_BATTERY_LOW;
+        request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
+        process_control_landing();
+    }
+    else 
+        ROS_INFO("Battery Low");
 }
 
 void DroneCommander::rc_callback(const sensor_msgs::Joy & _rc) {
@@ -1018,15 +1055,23 @@ void DroneCommander::process_control_landing() {
     bool is_landing_finish = state.flight_status < DCMD::FLIGHT_STATUS_IN_AIR;
 
     if (is_landing_finish) {
-        request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
-        ROS_INFO("Finsh landing, turn to IDLE");
+        this->try_arm(false);
+
+        if (!state.is_armed) {
+            request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
+            ROS_INFO("Finsh landing, turn to IDLE");
+        } else {
+            state.landing_mode = DCMD::LANDING_MODE_ATT;
+            set_att_setpoint(0 ,0, 0, LANDING_VEL_Z_EMERGENCY, true, false);
+        }
+
     } else {
         if (state.vo_valid && state.landing_mode == DCMD::LANDING_MODE_XYVEL) {
             if (state.pos.z > LANDING_ATT_MODE_HEIGHT) {
                 set_vel_setpoint(0, 0, state.landing_velocity);
             } else {
                 state.landing_mode = DCMD::LANDING_MODE_ATT;
-                set_att_setpoint(0 ,0, 0, state.landing_velocity, true, false);
+                set_att_setpoint(0 ,0, 0, LANDING_VEL_Z_EMERGENCY, true, false);
             }
 
         } else {
