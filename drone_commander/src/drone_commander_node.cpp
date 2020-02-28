@@ -17,6 +17,7 @@
 #include <dji_sdk/ControlDevice.h>
 #include <dji_sdk/SDKControlAuthority.h>
 #include <dji_sdk/DroneArmControl.h>
+#include <dji_sdk/DroneTaskControl.h>
 #endif
 
 #include <geometry_msgs/Vector3.h>
@@ -32,7 +33,7 @@ using namespace Eigen;
 #define MAX_LOSS_SDK 0.1f
 #define MAX_ODOM_VELOCITY 25.0f
 
-#define RC_DEADZONE_RPY 0.01
+#define RC_DEADZONE_RPY 0.05
 #define RC_DEADZONE_THRUST 0.2
 
 #define RC_MAX_TILT_VEL 3.0
@@ -43,14 +44,14 @@ using namespace Eigen;
 #define RC_MAX_TILT_ANGLE 0.52
 #define TAKEOFF_VEL_Z 1.0
 #define LANDING_VEL_Z -0.3
-#define LANDING_VEL_Z_EMERGENCY -1.0
+#define LANDING_VEL_Z_EMERGENCY -2.0
 #define MAX_AUTO_Z_ERROR 0.05
 #define MAX_AUTO_TILT_ERROR 0.05
 #define MIN_TAKEOFF_HEIGHT 0.5
 #define MIN_TRY_ARM_DURATION 1.0
 #define MAX_TRY_ARM_TIMES 5
 
-#define MAX_LOSS_ONBOARD_CMD 3.0
+#define MAX_LOSS_ONBOARD_CMD 60
 #define LANDING_ATT_MODE_HEIGHT 0.3
 #define LANDING_ATT_MIN_HEIGHT 0.1
 
@@ -66,6 +67,11 @@ using namespace Eigen;
 #define DPCL drone_pos_ctrl_cmd
 
 #define DANGER_SPEED_HOVER (RC_MAX_TILT_VEL+0.5)
+
+#define BATTERY_REMAIN_CUTOFF 240.0f
+#define BATTERY_REMAIN_PARAM_A 345.375f 
+#define BATTERY_REMAIN_PARAM_B -4757.3f
+#define LANDING_VEL_Z_BATTERY_LOW -1.0
 
 inline double float_constrain(double v, double min, double max)
 {
@@ -128,6 +134,7 @@ class DroneCommander {
     drone_pos_ctrl_cmd * ctrl_cmd = nullptr;
 
     ros::ServiceClient control_auth_client;
+    ros::ServiceClient drone_task_control;
 
     Eigen::Vector3d hover_pos = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d takeoff_origin = Eigen::Vector3d(0, 0, 0);
@@ -146,6 +153,15 @@ class DroneCommander {
     bool yaw_sp_inited = false;
 
     bool rc_fail_detection = true;
+
+    double battery_life = 600.0f;
+
+    bool in_fc_landing = false;
+
+    bool is_landing_tail = false;
+
+    double landing_thrust = 0.03;
+
 
 public:
     DroneCommander(ros::NodeHandle & _nh):
@@ -169,7 +185,7 @@ public:
         ctrl_cmd_pub = nh.advertise<drone_pos_ctrl_cmd>("/drone_position_control/drone_pos_cmd", 1);
 
         control_auth_client = nh.serviceClient<dji_sdk::SDKControlAuthority>("sdk_control_authority");
-
+        drone_task_control = nh.serviceClient<dji_sdk::DroneTaskControl>("sdk_task_control");
         ROS_INFO("Waitting for services");
         control_auth_client.waitForExistence();
         ROS_INFO("Services ready");
@@ -179,6 +195,7 @@ public:
         loop_timer = nh.createTimer(ros::Duration(LOOP_DURATION), &DroneCommander::loop, this);
 
         nh.param<bool>("rc_fail_detection", rc_fail_detection, true);
+        nh.param<double>("landing_thrust", landing_thrust, 0.0);
 
         if (rc_fail_detection) {
             ROS_INFO("Will detect RC fail");
@@ -263,6 +280,7 @@ public:
     void set_pos_setpoint(double x, double y, double z, double yaw=NAN, double vx_ff=0, double vy_ff=0, double vz_ff=0, double ax_ff=0, double ay_ff=0, double az_ff=0);
     void set_vel_setpoint(double vx, double vy, double vz, double yaw=NAN, double ax_ff=0, double ay_ff=0, double az_ff=0);
 
+    bool request_drone_landing();
 };
 
 
@@ -456,7 +474,8 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     state.vo_valid = vo_valid;
     if (state.vo_valid) {
         odometry = _odom;
-        last_vo_ts = _odom.header.stamp;
+        //FIX vo lost due to time align
+        last_vo_ts = ros::Time::now();
     }
 
     state.pos.x = pose.position.x;
@@ -469,8 +488,39 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     state.yaw = yaw_vo;
 }
 
+inline double lowpass_filter(double input, double fc, double outputlast, double dt) {
+	double RC = 1.0 / (fc *2 * M_PI);
+	double alpha = dt / (RC + dt);
+	return outputlast + (alpha* (input - outputlast));
+}
+
 void DroneCommander::battery_callback(const sensor_msgs::BatteryState &_bat) {
     state.bat_vol = _bat.voltage;
+
+    double battery_life_tmp = BATTERY_REMAIN_PARAM_A * state.bat_vol + BATTERY_REMAIN_PARAM_B;
+
+    // if ((battery_life - battery_life_tmp) > 60)
+    //     battery_life = battery_life - 60;
+    // else if ((battery_life - battery_life_tmp) < -60)
+    //     battery_life = battery_life + 60;
+    // else
+    //     battery_life = BATTERY_REMAIN_PARAM_A* state.bat_vol + BATTERY_REMAIN_PARAM_B;
+
+    state.bat_remain = lowpass_filter(battery_life_tmp, 2 , state.bat_remain, 0.1);
+
+    //ROS_INFO("Battery Level: %3.2f, Left Time: %3.2f", state.bat_vol, state.bat_remain);
+
+    if (state.bat_remain <= BATTERY_REMAIN_CUTOFF &&
+        state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) {
+        //ROS_INFO("Battery Low, Landing");
+        state.landing_mode = DCMD::LANDING_MODE_XYVEL;
+        state.landing_velocity = LANDING_VEL_Z_BATTERY_LOW;
+        request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
+        process_control_landing();
+    }
+    else  {
+        //ROS_INFO("Battery Low");
+    }
 }
 
 void DroneCommander::rc_callback(const sensor_msgs::Joy & _rc) {
@@ -537,6 +587,8 @@ void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, dou
     } else {
         ctrl_cmd->yaw_sp = yaw;
     }
+
+    ROS_INFO("Att z %f", z);
     
     Quaterniond quat_sp = AngleAxisd(roll, Vector3d::UnitX())
         * AngleAxisd(pitch, Vector3d::UnitY())
@@ -675,7 +727,11 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
 
             case OCMD::CTRL_LANDING_COMMAND: {
                 ROS_INFO("Onboard trying to Landing");
-                if (_cmd.param1 == 1) {
+                if (_cmd.param1 < 0) {
+                    state.landing_mode = DCMD::LANDING_MODE_ATT;
+                    is_landing_tail = true;
+                }
+                else if (_cmd.param1 == 1) {
                     state.landing_mode = DCMD::LANDING_MODE_ATT;
                 } else {
                     state.landing_mode = DCMD::LANDING_MODE_XYVEL;
@@ -870,8 +926,11 @@ void DroneCommander::process_control_idle() {
 }
 
 void DroneCommander::process_onboard_input () {
-    //TODO: writing onboard input
-
+    if (rc_moving_stick()) {
+        state.onboard_cmd_valid = false;
+        state.ctrl_input_state = DCMD::CTRL_INPUT_RC;
+        ROS_INFO("Change Source to RC Due to RC moving stick");
+    }
 }
 
 void DroneCommander::process_control() {
@@ -963,6 +1022,7 @@ void DroneCommander::process_control_takeoff() {
             fabs(pos.y - takeoff_origin.y()) < MAX_AUTO_TILT_ERROR && 
             fabs(pos.z - (takeoff_origin.z() + state.takeoff_target_height)) < MAX_AUTO_Z_ERROR) {
             is_takeoff_finish = true;
+            ROS_INFO("Takeoff finish");
         } else {
             is_takeoff_finish = false;
         }
@@ -1003,33 +1063,65 @@ void DroneCommander::process_control_takeoff() {
         // ROS_INFO("Already in air, fly to %3.2lf %3.2lf %3.2lf", ctrl_cmd->pos_sp.x, ctrl_cmd->pos_sp.y, ctrl_cmd->pos_sp.z);
     } else {
         if (state.vo_valid) {
-            set_att_setpoint(0, 0, ctrl_cmd->yaw_sp, state.takeoff_velocity, true, false);            
+            set_att_setpoint(0, 0, yaw_vo, state.takeoff_velocity, true, false);            
         }
     }
 
     send_ctrl_cmd();
 }
 
-
+bool DroneCommander::request_drone_landing() {
+    dji_sdk::DroneTaskControl srv;
+    srv.request.task = dji_sdk::DroneTaskControlRequest::TASK_LAND;
+    if (drone_task_control.call(srv)) {
+        if (srv.response.result) {
+            ROS_INFO("Using DJI Landing success....");
+            // request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
+            in_fc_landing = true;
+            return true;
+        }
+    }
+    return false;
+}
 
 void DroneCommander::process_control_landing() {
     //TODO: write better landing
     bool is_landing_finish = state.flight_status < DCMD::FLIGHT_STATUS_IN_AIR;
 
     if (is_landing_finish) {
-        request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
-        ROS_INFO("Finsh landing, turn to IDLE");
+        ROS_INFO("Landing finish; try disarm...");
+        this->try_arm(false);
+        if (!state.is_armed) {
+            request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
+            ROS_INFO("Finsh landing, turn to IDLE");
+            is_landing_tail = false;
+        }
+        return;
+    }
+    if (is_landing_tail) {
+        ROS_INFO("Is landing tail....");
+        set_att_setpoint(0, 0, yaw_vo, landing_thrust, false, false);
+        send_ctrl_cmd();
     } else {
         if (state.vo_valid && state.landing_mode == DCMD::LANDING_MODE_XYVEL) {
             if (state.pos.z > LANDING_ATT_MODE_HEIGHT) {
                 set_vel_setpoint(0, 0, state.landing_velocity);
             } else {
-                state.landing_mode = DCMD::LANDING_MODE_ATT;
-                set_att_setpoint(0 ,0, 0, state.landing_velocity, true, false);
+                is_landing_tail = true;
+                //set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
+
+                /*
+                bool res = request_drone_landing();
+                if (!res) {
+                    state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
+                    ROS_ERROR("Can't landing with dji; emergency landing instead");
+                    set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
+                    state.landing_mode = DCMD::LANDING_MODE_ATT;
+                }*/
             }
 
         } else {
-            set_att_setpoint(0 ,0, 0, state.landing_velocity, true, false);
+            set_att_setpoint(0, 0, yaw_vo, state.landing_velocity, true, false);
         }
         send_ctrl_cmd();
     }
@@ -1041,8 +1133,7 @@ void DroneCommander::request_ctrl_mode(uint32_t req_ctrl_mode) {
     // ROS_INFO("Request %d", req_ctrl_mode);
     switch (req_ctrl_mode) {
         case DCMD::CTRL_MODE_LANDING: {
-            if (state.flight_status < state.FLIGHT_STATUS_IN_AIR) {
-                //Not in air; goto IDLE
+            if (state.flight_status < state.FLIGHT_STATUS_ARMED) {
                 state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
             } else {
                 state.commander_ctrl_mode = req_ctrl_mode;

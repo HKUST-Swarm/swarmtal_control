@@ -8,6 +8,8 @@ uint32 CTRL_LANDING_COMMAND=6
 uint32 CTRL_HOVER_COMMAND=7
 uint32 CTRL_ARM_COMMAND=8
 
+uint32 CTRL_PLANING_TGT_COMMAND=10
+
 uint32 command_type
 
 # For POS param1 2 3 is x y z * 10000 
