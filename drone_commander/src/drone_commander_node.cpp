@@ -17,6 +17,7 @@
 #include <dji_sdk/ControlDevice.h>
 #include <dji_sdk/SDKControlAuthority.h>
 #include <dji_sdk/DroneArmControl.h>
+#include <dji_sdk/DroneTaskControl.h>
 #endif
 
 #include <geometry_msgs/Vector3.h>
@@ -133,6 +134,7 @@ class DroneCommander {
     drone_pos_ctrl_cmd * ctrl_cmd = nullptr;
 
     ros::ServiceClient control_auth_client;
+    ros::ServiceClient drone_task_control;
 
     Eigen::Vector3d hover_pos = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d takeoff_origin = Eigen::Vector3d(0, 0, 0);
@@ -153,6 +155,8 @@ class DroneCommander {
     bool rc_fail_detection = true;
 
     double battery_life = 600.0f;
+
+    bool in_fc_landing = false;
 
 public:
     DroneCommander(ros::NodeHandle & _nh):
@@ -176,7 +180,7 @@ public:
         ctrl_cmd_pub = nh.advertise<drone_pos_ctrl_cmd>("/drone_position_control/drone_pos_cmd", 1);
 
         control_auth_client = nh.serviceClient<dji_sdk::SDKControlAuthority>("sdk_control_authority");
-
+        drone_task_control = nh.serviceClient<dji_sdk::DroneTaskControl>("sdk_task_control");
         ROS_INFO("Waitting for services");
         control_auth_client.waitForExistence();
         ROS_INFO("Services ready");
@@ -270,6 +274,7 @@ public:
     void set_pos_setpoint(double x, double y, double z, double yaw=NAN, double vx_ff=0, double vy_ff=0, double vz_ff=0, double ax_ff=0, double ay_ff=0, double az_ff=0);
     void set_vel_setpoint(double vx, double vy, double vz, double yaw=NAN, double ax_ff=0, double ay_ff=0, double az_ff=0);
 
+    bool request_drone_landing();
 };
 
 
@@ -1055,7 +1060,19 @@ void DroneCommander::process_control_takeoff() {
     send_ctrl_cmd();
 }
 
-
+bool DroneCommander::request_drone_landing() {
+    dji_sdk::DroneTaskControl srv;
+    srv.request.task = dji_sdk::DroneTaskControlRequest::TASK_LAND;
+    if (drone_task_control.call(srv)) {
+        if (srv.response.result) {
+            ROS_INFO("Using DJI Landing success....");
+            // request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
+            in_fc_landing = true;
+            return true;
+        }
+    }
+    return false;
+}
 
 void DroneCommander::process_control_landing() {
     //TODO: write better landing
@@ -1063,23 +1080,30 @@ void DroneCommander::process_control_landing() {
 
     if (is_landing_finish) {
         this->try_arm(false);
-
         if (!state.is_armed) {
             request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
             ROS_INFO("Finsh landing, turn to IDLE");
-        } else {
-            state.landing_mode = DCMD::LANDING_MODE_ATT;
-            set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
         }
-
+        return;
+    }
+    if (in_fc_landing) {
+        ROS_INFO("Waiting FC landing.....");
     } else {
         if (state.vo_valid && state.landing_mode == DCMD::LANDING_MODE_XYVEL) {
             if (state.pos.z > LANDING_ATT_MODE_HEIGHT) {
                 set_vel_setpoint(0, 0, state.landing_velocity);
             } else {
-                state.landing_mode = DCMD::LANDING_MODE_ATT;
-                state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
-                set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
+                // state.landing_mode = DCMD::LANDING_MODE_ATT;
+                // state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
+                // set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
+
+                bool res = request_drone_landing();
+                if (!res) {
+                    state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
+                    ROS_ERROR("Can't landing with dji; emergency landing instead");
+                    set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
+                    state.landing_mode = DCMD::LANDING_MODE_ATT;
+                }
             }
 
         } else {
