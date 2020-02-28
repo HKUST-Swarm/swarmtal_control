@@ -40,4 +40,4 @@ pid_param:
         max_i: 30.0
         level_thrust: 0.2
 
-landing_thrust: 0.04
+landing_thrust: 0.03
