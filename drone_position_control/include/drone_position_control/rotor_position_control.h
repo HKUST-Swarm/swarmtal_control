@@ -80,9 +80,10 @@ inline Eigen::Vector3d quat2eulers(const Eigen::Quaterniond & quat) {
 
 
 class RotorThrustControl {
-    RotorThrustControlParam param;
     PIDController con;
 public:
+    RotorThrustControlParam param;
+
     double acc = 0;
 
     RotorThrustControl(RotorThrustControlParam _param):
@@ -92,6 +93,7 @@ public:
 
     //We using NED in our control system
     void set_acc(double _acc) {
+        // printf("Setting ACC... %f\n", _acc);
         acc = _acc;
     }
 
@@ -178,7 +180,7 @@ public:
     }
 
     virtual double control_pos_z(const double z_sp, double dt) {
-            return float_constrain(pz_con.control(z_sp - pos.z(), dt), -10,3);
+        return float_constrain(pz_con.control(z_sp - pos.z(), dt), -10,3);
     }
     
     virtual Eigen::Vector3d control_pos(const Eigen::Vector3d & pos_sp, double dt) {
@@ -187,9 +189,11 @@ public:
             vel_sp.x() = float_constrain(px_con.control(pos_sp.x() - pos.x(), dt), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
             vel_sp.y() = float_constrain(py_con.control(pos_sp.y() - pos.y(), dt), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
             vel_sp.z() = float_constrain(control_pos_z(pos_sp.z(), dt), -MAX_VERTICAL_VEL, MAX_VERTICAL_VEL);
+            // printf("Z sp %f z %f vel sp %f\n", pos_sp.z(), pos.z());
+
 
             if (param.ctrl_frame == VEL_BODY_ACC_BODY) {
-                vel_sp = quat.inverse() * vel_sp;
+                // vel_sp = quat.inverse() * vel_sp;
             }
         }
 
@@ -209,9 +213,9 @@ public:
         }
         double az = vz_con.control(vel_z_sp - vel.z(), dt);
         if(param.coor_sys == FRAME_COOR_SYS::FLU) {
-            return az + one_g;
+            return float_constrain(az, -9, 9) + one_g;
         } else if(param.coor_sys == FRAME_COOR_SYS::NED) {
-           return  az - one_g;
+           return  float_constrain(az, -9, 9) - one_g;
         }
         return 0;
     }
@@ -272,10 +276,11 @@ public:
         // Do not care about aerodynamics drag
         // Only for hover
         //Note that abx sp should be negative here!
-        ret.abx_sp = (Up.dot(acc_sp) * Up).z();
-        
-        ret.thrust_sp = float_constrain(thrust_ctrl.control(ret.abx_sp, dt), MIN_THRUST, 1);
-        printf("AccZ %3.2f abx sp %3.2f body acc %3.2f thrustsp %3.2f\n", acc_sp.z(), ret.abx_sp, acc.z(), ret.thrust_sp);
+        // ret.abx_sp = (Up.dot(acc_sp) * Up).z();
+        // ret.thrust_sp = float_constrain(thrust_ctrl.control(ret.abx_sp, dt), MIN_THRUST, 1);
+
+        // ret.thrust_sp = acc_sp.z() + thrust_ctrl.param.level_thrust;
+        // printf("AccZ %3.2f abx sp %3.2f body acc %3.2f thrustsp %3.2f\n", acc_sp.z(), ret.abx_sp, acc.z(), ret.thrust_sp);
 
         if (fabs(acc_sp.z()) > 0.1) {
             pitch_sp = float_constrain(- asin(acc_sp.x() / acc_sp.norm()), -MAX_TILT_ANGLE, MAX_TILT_ANGLE);

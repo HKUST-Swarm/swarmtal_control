@@ -1,0 +1,23 @@
+<launch>
+    <arg name="vo_topic" default="/airsim_node/Drone_1/odom_local_ned"/>
+    <arg name="host" default="localhost" />
+
+    <node name="drone_commander" pkg="drone_commander" type="drone_commander_node" output="screen">
+        <remap from="/drone_commander/visual_odometry" to="$(arg vo_topic)"/>
+        <remap from="/drone_commander/flight_status" to="/airsim_node/flight_status"/>
+        <remap from="/drone_commander/rc" to="/airsim_node/rc"/>
+        <remap from="/drone_commander/control_device" to="/airsim_node/ctrl_dev"/>
+        <remap from="/drone_commander/sdk_control_authority" to="/airsim_node/auth"/>
+        <remap from="/drone_commander/fc_attitude" to="/airsim_node/Drone_1/attitude" />
+        <remap from="/drone_commander/battery" to="/airsim_node/battery" />
+        <param name="rc_fail_detection" type="bool" value="false" />
+    </node>
+    <node pkg="drone_position_control" name="drone_position_control" type="drone_position_control_node" output="screen">
+        <rosparam command="load" file="$(find drone_position_control)/launch/pos_control_param.yaml" />
+        <remap from="/drone_position_control/odometry" to="$(arg vo_topic)"/>
+        <remap from="/drone_position_control/fc_attitude" to="/airsim_node/Drone_1/attitude" />
+        <remap from="/drone_position_control/dji_sdk_control" to="/airsim_node/Drone_1/flight_control"/>
+        <remap from="/drone_position_control/fc_imu" to="/airsim_node/Drone_1/imu/imu_1"/>
+    </node>
+	
+</launch>

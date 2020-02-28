@@ -1,8 +1,3 @@
-#define PX4 0 
-#define DJI_SDK 1
-#define FCHardware DJI_SDK
-// #define FCHardware PX4
-
 #include <ros/ros.h>
 #include <swarmtal_msgs/drone_pos_ctrl_cmd.h>
 #include <swarmtal_msgs/drone_onboard_command.h>
@@ -13,11 +8,9 @@
 #include <math.h>
 #include <sensor_msgs/BatteryState.h>
 
-#if FCHardware == DJI_SDK
 #include <dji_sdk/ControlDevice.h>
 #include <dji_sdk/SDKControlAuthority.h>
 #include <dji_sdk/DroneArmControl.h>
-#endif
 
 #include <geometry_msgs/Vector3.h>
 #include <geometry_msgs/QuaternionStamped.h>
@@ -32,14 +25,14 @@ using namespace Eigen;
 #define MAX_LOSS_SDK 0.1f
 #define MAX_ODOM_VELOCITY 25.0f
 
-#define RC_DEADZONE_RPY 0.01
-#define RC_DEADZONE_THRUST 0.2
+#define RC_DEADZONE_RPY 1.0
+#define RC_DEADZONE_THRUST 1.0
 
 #define RC_MAX_TILT_VEL 3.0
 #define RC_MAX_Z_VEL 2.0
 #define DEFAULT_MAX_TITL_VEL 5.0
 #define DEFAULT_MAX_Z_VEL 3.0
-#define RC_MAX_YAW_RATE 1.57
+#define RC_MAX_YAW_RATE 2.0
 #define RC_MAX_TILT_ANGLE 0.52
 #define TAKEOFF_VEL_Z 1.0
 #define LANDING_VEL_Z -0.3
@@ -176,7 +169,6 @@ public:
         ctrl_cmd_pub = nh.advertise<drone_pos_ctrl_cmd>("/drone_position_control/drone_pos_cmd", 1);
 
         control_auth_client = nh.serviceClient<dji_sdk::SDKControlAuthority>("sdk_control_authority");
-
         ROS_INFO("Waitting for services");
         control_auth_client.waitForExistence();
         ROS_INFO("Services ready");
@@ -206,6 +198,14 @@ public:
         state.vo_valid = false;
 
         state.control_auth = DCMD::CTRL_AUTH_RC;
+
+#if FCHardware == AIRSIM
+        // state.flight_status = DCMD::FLIGHT_STATUS_IN_AIR;
+        // state.is_armed = true;
+        // state.control_auth = DCMD::CTRL_AUTH_THIS;
+        state.bat_vol = 16.8;
+        state.djisdk_valid = true;
+#endif
     }
     void init_subscribes() {
         vo_sub = nh.subscribe("visual_odometry", 1, &DroneCommander::vo_callback, this, ros::TransportHints().tcpNoDelay());
@@ -277,10 +277,17 @@ public:
 void DroneCommander::loop(const ros::TimerEvent & _e) {
     static int count = 0; 
     control_count ++;
+#if FC_HARDWARE == DJI_SDK
     if (state.djisdk_valid && (ros::Time::now() - last_flight_status_ts).toSec() > MAX_LOSS_SDK) {
         ROS_INFO("Flight Status loss time %3.2f, is invalid", (ros::Time::now() - last_flight_status_ts).toSec());        
         state.djisdk_valid = false;
     }
+#endif
+
+#if FC_HARDWARE == AIRSIM
+    state.djisdk_valid = true;
+#endif
+
 
     if (state.vo_valid && (ros::Time::now() - last_vo_ts).toSec() > MAX_VO_LATENCY) {
         state.vo_valid = false;
@@ -340,7 +347,7 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
         reset_yaw_sp();
     }
 
-    if (!state.ctrl_input_state == DCMD::CTRL_INPUT_ONBOARD)
+    if (!(state.ctrl_input_state == DCMD::CTRL_INPUT_ONBOARD))
         reset_ctrl_cmd();
     
     process_input_source();
@@ -358,7 +365,7 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
 
 
 void DroneCommander::try_arm(bool arm) {
-    dji_sdk::DroneArmControl arm_srv;
+
     if (arm==state.is_armed )
         return;
     // if ((ros::Time::now() - last_try_arm_time).toSec() < MIN_TRY_ARM_DURATION) {
@@ -374,20 +381,23 @@ void DroneCommander::try_arm(bool arm) {
     if (!arm) {
         request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
     }
+    
+    dji_sdk::DroneArmControl arm_srv;
     if (state.djisdk_valid && state.flight_status == DCMD::FLIGHT_STATUS_IDLE && arm) {
         // TODO:
         // rosservice call /dji_sdk_1/dji_sdk/drone_arm_control "arm: 0"
         arm_srv.request.arm = arm;
-        ros::service::call("/dji_sdk_1/dji_sdk/drone_arm_control", arm_srv);
+        ros::service::call("drone_arm_control", arm_srv);
         ROS_INFO("Try arm success %d", arm_srv.response.result);
         // if *
         if (!arm_srv.response.result) {
             fail_arm_times ++;
         }
+
     }
     if (state.djisdk_valid && ! arm) {
         arm_srv.request.arm = arm;
-        ros::service::call("/dji_sdk_1/dji_sdk/drone_arm_control", arm_srv);
+        ros::service::call("drone_arm_control", arm_srv);
         ROS_INFO("Try DIsarm success %d", arm_srv.response.result);
         // if *
         if (!arm_srv.response.result) {
@@ -1262,7 +1272,6 @@ bool DroneCommander::is_rc_valid(const sensor_msgs::Joy & _rc) {
     return true;
 }
 
-
 void DroneCommander::ctrl_dev_callback(const dji_sdk::ControlDevice & _ctrl_dev) {
     //RC 0
     //App 1
@@ -1278,7 +1287,6 @@ void DroneCommander::ctrl_dev_callback(const dji_sdk::ControlDevice & _ctrl_dev)
     if (_ctrl_dev.controlDevice == 0) {
         state.control_auth = DCMD::CTRL_AUTH_RC;
     }
-
 }
 
 void DroneCommander::reset_yaw_sp() {

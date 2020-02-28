@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(drone_position_control)
 
-## Compile as C++11, supported in ROS Kinetic and newer
-add_compile_options(-std=c++11)
+add_compile_options(-std=c++11 -DFCHardware=DJI_SDK)
 
 set(CMAKE_BUILD_TYPE "Release")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
