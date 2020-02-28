@@ -44,7 +44,7 @@ using namespace Eigen;
 #define RC_MAX_TILT_ANGLE 0.52
 #define TAKEOFF_VEL_Z 1.0
 #define LANDING_VEL_Z -0.3
-#define LANDING_VEL_Z_EMERGENCY -3.0
+#define LANDING_VEL_Z_EMERGENCY -2.0
 #define MAX_AUTO_Z_ERROR 0.05
 #define MAX_AUTO_TILT_ERROR 0.05
 #define MIN_TAKEOFF_HEIGHT 0.5
@@ -158,6 +158,11 @@ class DroneCommander {
 
     bool in_fc_landing = false;
 
+    bool is_landing_tail = false;
+
+    double landing_thrust = 0.03;
+
+
 public:
     DroneCommander(ros::NodeHandle & _nh):
         nh(_nh) {
@@ -190,6 +195,7 @@ public:
         loop_timer = nh.createTimer(ros::Duration(LOOP_DURATION), &DroneCommander::loop, this);
 
         nh.param<bool>("rc_fail_detection", rc_fail_detection, true);
+        nh.param<double>("landing_thrust", landing_thrust, 0.0);
 
         if (rc_fail_detection) {
             ROS_INFO("Will detect RC fail");
@@ -507,7 +513,7 @@ void DroneCommander::battery_callback(const sensor_msgs::BatteryState &_bat) {
     if (state.bat_remain <= BATTERY_REMAIN_CUTOFF &&
         state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) {
         //ROS_INFO("Battery Low, Landing");
-        state.landing_mode = DCMD::LANDING_MODE_ATT;
+        state.landing_mode = DCMD::LANDING_MODE_XYVEL;
         state.landing_velocity = LANDING_VEL_Z_BATTERY_LOW;
         request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
         process_control_landing();
@@ -721,7 +727,11 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
 
             case OCMD::CTRL_LANDING_COMMAND: {
                 ROS_INFO("Onboard trying to Landing");
-                if (_cmd.param1 == 1) {
+                if (_cmd.param1 < 0) {
+                    state.landing_mode = DCMD::LANDING_MODE_ATT;
+                    is_landing_tail = true;
+                }
+                else if (_cmd.param1 == 1) {
                     state.landing_mode = DCMD::LANDING_MODE_ATT;
                 } else {
                     state.landing_mode = DCMD::LANDING_MODE_XYVEL;
@@ -1079,31 +1089,35 @@ void DroneCommander::process_control_landing() {
     bool is_landing_finish = state.flight_status < DCMD::FLIGHT_STATUS_IN_AIR;
 
     if (is_landing_finish) {
+        ROS_INFO("Landing finish; try disarm...");
         this->try_arm(false);
         if (!state.is_armed) {
             request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
             ROS_INFO("Finsh landing, turn to IDLE");
+            is_landing_tail = false;
         }
         return;
     }
-    if (in_fc_landing) {
-        ROS_INFO("Waiting FC landing.....");
+    if (is_landing_tail) {
+        ROS_INFO("Is landing tail....");
+        set_att_setpoint(0, 0, yaw_vo, landing_thrust, false, false);
+        send_ctrl_cmd();
     } else {
         if (state.vo_valid && state.landing_mode == DCMD::LANDING_MODE_XYVEL) {
             if (state.pos.z > LANDING_ATT_MODE_HEIGHT) {
                 set_vel_setpoint(0, 0, state.landing_velocity);
             } else {
-                // state.landing_mode = DCMD::LANDING_MODE_ATT;
-                // state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
-                // set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
+                is_landing_tail = true;
+                //set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
 
+                /*
                 bool res = request_drone_landing();
                 if (!res) {
                     state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
                     ROS_ERROR("Can't landing with dji; emergency landing instead");
                     set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
                     state.landing_mode = DCMD::LANDING_MODE_ATT;
-                }
+                }*/
             }
 
         } else {
@@ -1119,8 +1133,7 @@ void DroneCommander::request_ctrl_mode(uint32_t req_ctrl_mode) {
     // ROS_INFO("Request %d", req_ctrl_mode);
     switch (req_ctrl_mode) {
         case DCMD::CTRL_MODE_LANDING: {
-            if (state.flight_status < state.FLIGHT_STATUS_IN_AIR) {
-                //Not in air; goto IDLE
+            if (state.flight_status < state.FLIGHT_STATUS_ARMED) {
                 state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
             } else {
                 state.commander_ctrl_mode = req_ctrl_mode;
