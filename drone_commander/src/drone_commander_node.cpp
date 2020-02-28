@@ -32,7 +32,7 @@ using namespace Eigen;
 #define MAX_LOSS_SDK 0.1f
 #define MAX_ODOM_VELOCITY 25.0f
 
-#define RC_DEADZONE_RPY 0.01
+#define RC_DEADZONE_RPY 0.05
 #define RC_DEADZONE_THRUST 0.2
 
 #define RC_MAX_TILT_VEL 3.0
@@ -43,14 +43,14 @@ using namespace Eigen;
 #define RC_MAX_TILT_ANGLE 0.52
 #define TAKEOFF_VEL_Z 1.0
 #define LANDING_VEL_Z -0.3
-#define LANDING_VEL_Z_EMERGENCY -1.0
+#define LANDING_VEL_Z_EMERGENCY -3.0
 #define MAX_AUTO_Z_ERROR 0.05
 #define MAX_AUTO_TILT_ERROR 0.05
 #define MIN_TAKEOFF_HEIGHT 0.5
 #define MIN_TRY_ARM_DURATION 1.0
 #define MAX_TRY_ARM_TIMES 5
 
-#define MAX_LOSS_ONBOARD_CMD 3.0
+#define MAX_LOSS_ONBOARD_CMD 60
 #define LANDING_ATT_MODE_HEIGHT 0.3
 #define LANDING_ATT_MIN_HEIGHT 0.1
 
@@ -497,18 +497,19 @@ void DroneCommander::battery_callback(const sensor_msgs::BatteryState &_bat) {
 
     state.bat_remain = lowpass_filter(battery_life_tmp, 2 , state.bat_remain, 0.1);
 
-    ROS_INFO("Battery Level: %3.2f, Left Time: %3.2f", state.bat_vol, state.bat_remain);
+    //ROS_INFO("Battery Level: %3.2f, Left Time: %3.2f", state.bat_vol, state.bat_remain);
 
     if (state.bat_remain <= BATTERY_REMAIN_CUTOFF &&
         state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) {
-        ROS_INFO("Battery Low, Landing");
+        //ROS_INFO("Battery Low, Landing");
         state.landing_mode = DCMD::LANDING_MODE_ATT;
         state.landing_velocity = LANDING_VEL_Z_BATTERY_LOW;
         request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
         process_control_landing();
     }
-    else 
-        ROS_INFO("Battery Low");
+    else  {
+        //ROS_INFO("Battery Low");
+    }
 }
 
 void DroneCommander::rc_callback(const sensor_msgs::Joy & _rc) {
@@ -575,6 +576,8 @@ void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, dou
     } else {
         ctrl_cmd->yaw_sp = yaw;
     }
+
+    ROS_INFO("Att z %f", z);
     
     Quaterniond quat_sp = AngleAxisd(roll, Vector3d::UnitX())
         * AngleAxisd(pitch, Vector3d::UnitY())
@@ -908,8 +911,11 @@ void DroneCommander::process_control_idle() {
 }
 
 void DroneCommander::process_onboard_input () {
-    //TODO: writing onboard input
-
+    if (rc_moving_stick()) {
+        state.onboard_cmd_valid = false;
+        state.ctrl_input_state = DCMD::CTRL_INPUT_RC;
+        ROS_INFO("Change Source to RC Due to RC moving stick");
+    }
 }
 
 void DroneCommander::process_control() {
@@ -1001,6 +1007,7 @@ void DroneCommander::process_control_takeoff() {
             fabs(pos.y - takeoff_origin.y()) < MAX_AUTO_TILT_ERROR && 
             fabs(pos.z - (takeoff_origin.z() + state.takeoff_target_height)) < MAX_AUTO_Z_ERROR) {
             is_takeoff_finish = true;
+            ROS_INFO("Takeoff finish");
         } else {
             is_takeoff_finish = false;
         }
@@ -1041,7 +1048,7 @@ void DroneCommander::process_control_takeoff() {
         // ROS_INFO("Already in air, fly to %3.2lf %3.2lf %3.2lf", ctrl_cmd->pos_sp.x, ctrl_cmd->pos_sp.y, ctrl_cmd->pos_sp.z);
     } else {
         if (state.vo_valid) {
-            set_att_setpoint(0, 0, ctrl_cmd->yaw_sp, state.takeoff_velocity, true, false);            
+            set_att_setpoint(0, 0, yaw_vo, state.takeoff_velocity, true, false);            
         }
     }
 
@@ -1062,7 +1069,7 @@ void DroneCommander::process_control_landing() {
             ROS_INFO("Finsh landing, turn to IDLE");
         } else {
             state.landing_mode = DCMD::LANDING_MODE_ATT;
-            set_att_setpoint(0 ,0, 0, LANDING_VEL_Z_EMERGENCY, true, false);
+            set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
         }
 
     } else {
@@ -1071,11 +1078,12 @@ void DroneCommander::process_control_landing() {
                 set_vel_setpoint(0, 0, state.landing_velocity);
             } else {
                 state.landing_mode = DCMD::LANDING_MODE_ATT;
-                set_att_setpoint(0 ,0, 0, LANDING_VEL_Z_EMERGENCY, true, false);
+                state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
+                set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
             }
 
         } else {
-            set_att_setpoint(0 ,0, 0, state.landing_velocity, true, false);
+            set_att_setpoint(0, 0, yaw_vo, state.landing_velocity, true, false);
         }
         send_ctrl_cmd();
     }
