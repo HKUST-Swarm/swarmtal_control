@@ -761,12 +761,12 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
 
 
 bool DroneCommander::rc_request_onboard() {
-    return (rc.axes[4] == 10000 && rc.axes[5] == -10000);
+    return (rc.axes[4] > 8000 && rc.axes[5] < -8000);
 }
 
 bool DroneCommander::rc_request_vo() {
     // return (rc.axes[4] == 10000 && rc.axes[5] == -10000);
-    return (rc.axes[4] == 10000);
+    return (rc.axes[4] > 8000);
 }
 
 bool DroneCommander::rc_moving_stick () {
