@@ -22,22 +22,19 @@ pid_param:
         max_i: 30
 
     p_z:
-        p : 3.509
-        i : 0.1249
-        d : 0.3032
+        p : 3.0
+        i : 0.0
+        d : 0.0
         max_i : 30
         
     v_z:
-        p : 1.0
-        i : 0.1
-        d : 0.1
-        max_i: 1000
+        p : 0.14
+        i : 0.02
+        d : 0.0
+        max_i: 5
 
     thr:
-        p : 0.02
-        i : 0.01
-        d : 0.000
-        max_i: 30.0
-        level_thrust: 0.2
+        level_thrust: 0.5
+        thrust_limit: 0.2
 
 landing_thrust: 0.03

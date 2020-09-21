@@ -17,9 +17,10 @@
 
 using namespace swarmtal_msgs;
 #define MAX_CMD_LOST_TIME 0.5f
-#define USE_DJI_THRUST_CTRL
+// #define USE_DJI_THRUST_CTRL
 #define ANGULARRATE_MIX 0.9
 #define MAX_ACC 8 // max accerelation
+// #define TEST_LEVEL_THRUST
 
 class DronePosControl {
     ros::NodeHandle & nh;
@@ -58,6 +59,7 @@ class DronePosControl {
     double yaw_offset = 0;
     double yaw_odom = 0;
     double yaw_fc = 0;
+    double thrust_limit;
 
     ros::Time last_cmd_ts, start_time;
 
@@ -127,7 +129,8 @@ class DronePosControl {
         nh.param<double>("pid_param/thr/i", ctrlP.thrust_ctrl.abx.i, 0);
         nh.param<double>("pid_param/thr/d", ctrlP.thrust_ctrl.abx.d, 0);
         nh.param<double>("pid_param/thr/max_i", ctrlP.thrust_ctrl.abx.max_err_i, 0);
-        nh.param<double>("pid_param/thr/level_thrust", ctrlP.thrust_ctrl.level_thrust, 0.3);
+        nh.param<double>("pid_param/thr/level_thrust", ctrlP.thrust_ctrl.level_thrust, 0.15);
+        nh.param<double>("pid_param/thr/thrust_limit", thrust_limit, 0.3);
 
         nh.param<double>("odom_gc_pos/x", odom_gc_pos.x(), 0);
         nh.param<double>("odom_gc_pos/y", odom_gc_pos.y(), 0);
@@ -176,9 +179,9 @@ public:
         int r = rand();  
         char str[100] = {0};
 
-        sprintf(buffer, "/home/dji/swarm_log_lastest/log_%d.csv", r);
+        sprintf(buffer, "/home/dji/log_%d.csv", r);
 
-        FILE* flog_list = fopen("/home/dji/swarm_log_lastest/log_list.txt", "a");
+        FILE* flog_list = fopen("/home/dji/log_list.txt", "a");
         if (flog_list != nullptr) {
             fprintf(flog_list,"%s\n", buffer);
             fflush(flog_list);
@@ -394,20 +397,26 @@ public:
 
         
         ROS_INFO("SPR %3.1f P %3.1f Y %3.1f (OSP%3.2f ODOM:%3.1f FC%3.1f) T %2.2f", 
-            atti_out.roll_sp*57.3, 
-            atti_out.pitch_sp*57.3,
-            yaw_sp*57.3,
-            atti_out.yaw_sp*57.3,
-            yaw_odom*57.3,
-            yaw_fc*57.3,
-            atti_out.thrust_sp
+           atti_out.roll_sp*57.3, 
+           atti_out.pitch_sp*57.3,
+           yaw_sp*57.3,
+           atti_out.yaw_sp*57.3,
+           yaw_odom*57.3,
+           yaw_fc*57.3,
+           atti_out.thrust_sp
         );
-         
-
+    
+#ifdef TEST_LEVEL_THRUST
+        atti_out.roll_sp = 0;
+        atti_out.pitch_sp = 0;
+        yaw_sp = 0;
+        atti_out.thrust_sp = pos_ctrl->thrust_ctrl.get_level_thrust();
+        atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
+#endif
         dji_command_so3.axes.push_back(atti_out.roll_sp);       // x
         dji_command_so3.axes.push_back(atti_out.pitch_sp);       // y
         if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_THRUST) {
-            atti_out.thrust_sp = float_constrain(atti_out.thrust_sp, 0, 0.6);
+            atti_out.thrust_sp = float_constrain(atti_out.thrust_sp, 0.02, thrust_limit);
             dji_command_so3.axes.push_back(atti_out.thrust_sp*100); // z
         } else {
             dji_command_so3.axes.push_back(atti_out.thrust_sp); // z
@@ -463,6 +472,9 @@ public:
             // ROS_INFO("Using direct velocity mode");
             atti_out.thrust_sp = vel_sp.z();
             atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_VELZ;
+#else
+            atti_out.thrust_sp = acc_sp.z() + pos_ctrl->thrust_ctrl.get_level_thrust();
+            atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
 #endif
             if (state.count % 50 == 0)
             {

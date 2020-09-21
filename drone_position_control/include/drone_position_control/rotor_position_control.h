@@ -99,11 +99,15 @@ public:
         con.reset();
     }
 
+    double get_level_thrust() {
+        return param.level_thrust;
+    }
+
     inline double control(const double & abx_sp, double dt) {
         //This is NED
         //Abx SP bigger, output thrust should be smaller(fly to ground)
         //Abx SP smaller, output thrust should be bigger
-        printf("In thrust control abx %3.2f acc %3.2f\n", abx_sp, acc);
+        //printf("In thrust control abx %3.2f acc %3.2f\n", abx_sp, acc);
         return -con.control(abx_sp - acc, dt, true) + param.level_thrust;
     }
 };
