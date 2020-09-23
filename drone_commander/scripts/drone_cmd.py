@@ -235,28 +235,36 @@ if __name__ == "__main__":
         count = 0
 
         while not rospy.is_shutdown() and count < args.count:
-            x = args.center[0]
-            y = args.center[1]
+            x0 = args.center[0]
+            y0 = args.center[1]
+            z0 = args.center[2]
 
             vx = 0
             vy = 0
             vz = 0
 
+            x = x0
+            y = y0
+            z = z0
+
             if args.axis == 0:
                 vx = func(t) * args.amp
+                x = func(t) * args.amp + x0
             elif args.axis == 1:
                 vy = func(t) * args.amp
+                y = func(t) * args.amp + y0
             elif args.axis == 2:
                 vz = func(t) * args.amp
+                z = func(t) * args.amp + z0
 
             cmd.param1 = int(x*10000)
             cmd.param2 = int(y*10000)
-            cmd.param3 = int(args.center[2]*10000)
+            cmd.param3 = int(z*10000)
             cmd.param5 = int(vx*10000)
             cmd.param6 = int(vy*10000)
             cmd.param7 = int(vz*10000)
 
-            print("[{}:{:3.2f}] Sweeping.... xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f} {:3.2f}".format(count, t, x, y, args.center[2], vx, vy, vz))
+            print("[{}:{:3.2f}] Sweeping.... xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f} {:3.2f}".format(count, t, x, y, z, vx, vy, vz))
             send(cmd, args, pub)
             t = t + 0.02
             if t > args.cycle:

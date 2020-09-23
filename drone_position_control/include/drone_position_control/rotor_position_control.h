@@ -147,6 +147,13 @@ public:
 
     }
 
+    void position_controller_reset() {
+        printf("Non position control mode, reset position controller\n");
+        px_con.reset();
+        py_con.reset();
+        pz_con.reset();
+    }
+
     virtual void set_pos(const Eigen::Vector3d & _pos) {
         pos = _pos;
         pos_inited = true;
@@ -182,14 +189,14 @@ public:
     }
 
     virtual double control_pos_z(const double z_sp, double dt) {
-            return float_constrain(pz_con.control(z_sp - pos.z(), dt), -10,3);
+            return float_constrain(pz_con.control2(z_sp, pos.z(), dt), -3,3);
     }
     
     virtual Eigen::Vector3d control_pos(const Eigen::Vector3d & pos_sp, double dt) {
         Eigen::Vector3d vel_sp(0, 0, 0);
         if (pos_inited) {
-            vel_sp.x() = float_constrain(px_con.control(pos_sp.x() - pos.x(), dt), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
-            vel_sp.y() = float_constrain(py_con.control(pos_sp.y() - pos.y(), dt), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
+            vel_sp.x() = float_constrain(px_con.control2(pos_sp.x(), pos.x(), dt), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
+            vel_sp.y() = float_constrain(py_con.control2(pos_sp.y(), pos.y(), dt), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
             vel_sp.z() = float_constrain(control_pos_z(pos_sp.z(), dt), -MAX_VERTICAL_VEL, MAX_VERTICAL_VEL);
 
             if (param.ctrl_frame == VEL_BODY_ACC_BODY) {
@@ -211,7 +218,7 @@ public:
         {
             one_g = 0;
         }
-        double az = vz_con.control(vel_z_sp - vel.z(), dt);
+        double az = vz_con.control2(vel_z_sp, vel.z(), dt);
         if(param.coor_sys == FRAME_COOR_SYS::FLU) {
             return az + one_g;
         } else if(param.coor_sys == FRAME_COOR_SYS::NED) {
@@ -223,8 +230,8 @@ public:
     virtual Eigen::Vector3d control_vel(const Eigen::Vector3d & vel_sp, double dt, bool input_body_frame=true, bool output_body_frame=true) {
         Eigen::Vector3d acc_sp(0, 0, 0);
         if (vel_inited) {
-            acc_sp.x() = float_constrain(vx_con.control(vel_sp.x() - vel.x(), dt), -MAX_HORIZON_ACC, MAX_HORIZON_ACC);
-            acc_sp.y() = float_constrain(vy_con.control(vel_sp.y() - vel.y(), dt), -MAX_HORIZON_ACC, MAX_HORIZON_ACC);
+            acc_sp.x() = float_constrain(vx_con.control2(vel_sp.x(), vel.x(), dt), -MAX_HORIZON_ACC, MAX_HORIZON_ACC);
+            acc_sp.y() = float_constrain(vy_con.control2(vel_sp.y(), vel.y(), dt), -MAX_HORIZON_ACC, MAX_HORIZON_ACC);
             acc_sp.z() = float_constrain(control_vel_z(vel_sp.z(), dt), -MAX_VERTICAL_ACC, MAX_VERTICAL_ACC);
 
             if (param.ctrl_frame == CTRL_FRAME::VEL_WORLD_ACC_BODY) {
@@ -278,8 +285,8 @@ public:
         //Note that abx sp should be negative here!
         ret.abx_sp = (Up.dot(acc_sp) * Up).z();
         
-        ret.thrust_sp = float_constrain(thrust_ctrl.control(ret.abx_sp, dt), MIN_THRUST, 1);
-        printf("AccZ %3.2f abx sp %3.2f body acc %3.2f thrustsp %3.2f\n", acc_sp.z(), ret.abx_sp, acc.z(), ret.thrust_sp);
+        //ret.thrust_sp = float_constrain(thrust_ctrl.control(ret.abx_sp, dt), MIN_THRUST, 1);
+        //printf("AccZ %3.2f abx sp %3.2f body acc %3.2f thrustsp %3.2f\n", acc_sp.z(), ret.abx_sp, acc.z(), ret.thrust_sp);
 
         if (fabs(acc_sp.z()) > 0.1) {
             pitch_sp = float_constrain(- asin(acc_sp.x() / acc_sp.norm()), -MAX_TILT_ANGLE, MAX_TILT_ANGLE);

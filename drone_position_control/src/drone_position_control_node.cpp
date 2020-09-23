@@ -20,7 +20,6 @@ using namespace swarmtal_msgs;
 // #define USE_DJI_THRUST_CTRL
 #define ANGULARRATE_MIX 0.9
 #define MAX_ACC 8 // max accerelation
-// #define TEST_LEVEL_THRUST
 
 class DronePosControl {
     ros::NodeHandle & nh;
@@ -73,8 +72,8 @@ class DronePosControl {
             return;
         }
         fprintf(
-                  //0  1 2  3  4  5  6  7   8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30
-            log_file, "%f,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
+                      //0 1 2  3  4  5  6  7   8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30
+            log_file, "%f,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
                 (ros::Time::now() - start_time).toSec(),//1
                 state.ctrl_mode,//2
                 state.pose.position.x,state.pose.position.y,state.pose.position.z,//5
@@ -97,37 +96,52 @@ class DronePosControl {
         nh.param<double>("pid_param/p_x/p", ctrlP.p_x.p, 0);
         nh.param<double>("pid_param/p_x/i", ctrlP.p_x.i, 0);
         nh.param<double>("pid_param/p_x/d", ctrlP.p_x.d, 0);
+        nh.param<double>("pid_param/p_x/b", ctrlP.p_x.b, 1.0);
+        nh.param<double>("pid_param/p_x/c", ctrlP.p_x.c, 1.0);
+        nh.param<double>("pid_param/p_x/tf", ctrlP.p_x.tf, 0);
         nh.param<double>("pid_param/p_x/max_i", ctrlP.p_x.max_err_i, 30);
 
         nh.param<double>("pid_param/p_y/p", ctrlP.p_y.p, 0);
         nh.param<double>("pid_param/p_y/i", ctrlP.p_y.i, 0);
         nh.param<double>("pid_param/p_y/d", ctrlP.p_y.d, 0);
+        nh.param<double>("pid_param/p_y/b", ctrlP.p_y.b, 1.0);
+        nh.param<double>("pid_param/p_y/c", ctrlP.p_y.c, 1.0);
+        nh.param<double>("pid_param/p_y/tf", ctrlP.p_y.tf, 0);
         nh.param<double>("pid_param/p_y/max_i", ctrlP.p_y.max_err_i, 30);
 
         nh.param<double>("pid_param/p_z/p", ctrlP.p_z.p, 0);
         nh.param<double>("pid_param/p_z/i", ctrlP.p_z.i, 0);
         nh.param<double>("pid_param/p_z/d", ctrlP.p_z.d, 0);
+        nh.param<double>("pid_param/p_z/b", ctrlP.p_z.b, 1.0);
+        nh.param<double>("pid_param/p_z/c", ctrlP.p_z.c, 1.0);
+        nh.param<double>("pid_param/p_z/tf", ctrlP.p_z.tf, 0);
         nh.param<double>("pid_param/p_z/max_i", ctrlP.p_z.max_err_i, 30);
 
         nh.param<double>("pid_param/v_x/p", ctrlP.v_x.p, 0);
         nh.param<double>("pid_param/v_x/i", ctrlP.v_x.i, 0);
         nh.param<double>("pid_param/v_x/d", ctrlP.v_x.d, 0);
+        nh.param<double>("pid_param/v_x/b", ctrlP.v_x.b, 1.0);
+        nh.param<double>("pid_param/v_x/c", ctrlP.v_x.c, 1.0);
+        nh.param<double>("pid_param/v_x/tf", ctrlP.v_x.tf, 0);
         nh.param<double>("pid_param/v_x/max_i", ctrlP.v_x.max_err_i, 15);
 
         nh.param<double>("pid_param/v_y/p", ctrlP.v_y.p, 0);
         nh.param<double>("pid_param/v_y/i", ctrlP.v_y.i, 0);
         nh.param<double>("pid_param/v_y/d", ctrlP.v_y.d, 0);
+        nh.param<double>("pid_param/v_y/b", ctrlP.v_y.b, 1.0);
+        nh.param<double>("pid_param/v_y/c", ctrlP.v_y.c, 1.0);
+        nh.param<double>("pid_param/v_y/tf", ctrlP.v_y.tf, 0);
         nh.param<double>("pid_param/v_y/max_i", ctrlP.v_y.max_err_i, 15);
 
 
         nh.param<double>("pid_param/v_z/p", ctrlP.v_z.p, 0);
         nh.param<double>("pid_param/v_z/i", ctrlP.v_z.i, 0);
         nh.param<double>("pid_param/v_z/d", ctrlP.v_z.d, 0);
+        nh.param<double>("pid_param/v_z/b", ctrlP.v_z.b, 1.0);
+        nh.param<double>("pid_param/v_z/c", ctrlP.v_z.c, 1.0);
+        nh.param<double>("pid_param/v_z/tf", ctrlP.v_z.tf, 0);
         nh.param<double>("pid_param/v_z/max_i", ctrlP.v_z.max_err_i, 10);
 
-        nh.param<double>("pid_param/thr/p", ctrlP.thrust_ctrl.abx.p, 0);
-        nh.param<double>("pid_param/thr/i", ctrlP.thrust_ctrl.abx.i, 0);
-        nh.param<double>("pid_param/thr/d", ctrlP.thrust_ctrl.abx.d, 0);
         nh.param<double>("pid_param/thr/max_i", ctrlP.thrust_ctrl.abx.max_err_i, 0);
         nh.param<double>("pid_param/thr/level_thrust", ctrlP.thrust_ctrl.level_thrust, 0.15);
         nh.param<double>("pid_param/thr/thrust_limit", thrust_limit, 0.3);
@@ -406,13 +420,6 @@ public:
            atti_out.thrust_sp
         );
     
-#ifdef TEST_LEVEL_THRUST
-        atti_out.roll_sp = 0;
-        atti_out.pitch_sp = 0;
-        yaw_sp = 0;
-        atti_out.thrust_sp = pos_ctrl->thrust_ctrl.get_level_thrust();
-        atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
-#endif
         dji_command_so3.axes.push_back(atti_out.roll_sp);       // x
         dji_command_so3.axes.push_back(atti_out.pitch_sp);       // y
         if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_THRUST) {
@@ -450,6 +457,8 @@ public:
                 vel_sp.x() = float_constrain(vel_sp.x(), -state.max_vel.x, state.max_vel.x);
                 vel_sp.y() = float_constrain(vel_sp.y(), -state.max_vel.y, state.max_vel.y);
                 vel_sp.z() = float_constrain(vel_sp.z(), -state.max_vel.z, state.max_vel.z);
+            } else {
+                pos_ctrl->position_controller_reset();
             }
             
             acc_sp = pos_ctrl->control_vel(vel_sp, dt);

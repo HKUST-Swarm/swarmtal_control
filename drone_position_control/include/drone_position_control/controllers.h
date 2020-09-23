@@ -5,6 +5,13 @@
 #ifndef PROJECT_CONTROLLERS_H
 #define PROJECT_CONTROLLERS_H
 
+#define THRES_RY 0.1
+
+inline double lowpass_filter(double input, double Ts, double outputLast, double dt) {
+    double alpha = dt / (Ts + dt);
+    return outputLast + (alpha * (input - outputLast));
+}
+
 inline double float_constrain(double v, double min, double max)
 {
     if (v < min) {
@@ -22,7 +29,9 @@ struct PIDParam {
     double p = 0;
     double i = 0;
     double d = 0;
-
+    double b = 1.0;
+    double c = 1.0;
+    double tf = 0.01;
     double max_err_i = 0;
 };
 
@@ -43,8 +52,9 @@ struct SchulingPIDParam {
 class PIDController {
     double err_integrate = 0;
     double err_last = 0;
-
     bool inited = false;
+    double offset = 0;
+    double err_d_filtered = 0;
 protected:
     PIDParam param;
 
@@ -59,19 +69,57 @@ public:
     void reset() {
         err_integrate = 0;
         err_last = 0;
+        err_d_filtered = 0;
+        inited = false;
+    }
+
+    virtual inline double control2(const double & r, const double & y , const double & dt, bool report=false) {
+        if (!inited) {
+            err_last = (param.c*r-y);
+            err_d_filtered = 0;
+            inited = true;
+                
+	        if (fabs(r-y) < THRES_RY && fabs(param.b - 1.0) > 0.1) {
+	    	    offset =  -(param.b*r-y)*param.p;
+                printf("PID2 Controller INIT R %f Y %f OFFset %f\n", r, y, offset);
+	        }
+        }
+
+        err_integrate = err_integrate + (r-y) * dt;
+
+        err_d_filtered = lowpass_filter(((param.c*r-y) - err_last)/dt, param.tf, err_d_filtered, dt);
+
+        double ret = (param.b*r - y) * param.p + err_integrate * param.i + err_d_filtered * param.d + offset;
+
+        err_last = param.c*r - y;
+
+        if (err_integrate > param.max_err_i)
+        {
+            err_integrate = param.max_err_i;
+        }
+        if (err_integrate < - param.max_err_i)
+        {
+            err_integrate = -param.max_err_i;
+        }
+
+        if (report)
+            printf("ERR %3.2f ERRI %3.2f OUTPUTI %3.2f OUTPUT %3.2f\n",  (param.b*r - y) , err_integrate,  err_integrate * param.i, ret);
+
+        return ret;
+ 
     }
 
     virtual inline double control(const double & err, double dt, bool report=false) {
-        //TODO:
         if (!inited) {
             err_last = err;
             inited = true;
         }
 
+        err_integrate = err_integrate + err * dt;
+
         double ret = err * param.p + err_integrate * param.i + (err - err_last)/dt * param.d;
 
         err_last = err;
-        err_integrate = err_integrate + err * dt;
 
         if (err_integrate > param.max_err_i)
         {
@@ -89,8 +137,6 @@ public:
 
 
     }
-
-
 };
 
 class SchulingPIDController: public PIDController {
@@ -155,8 +201,7 @@ public:
     virtual inline double control(const double x, const double & err, double dt, bool report=false) {
         this->calc_pid(x);
         // printf("V is %2.1f, PID %3.1f %3.1f %3.1f\n", x, param.p, param.i, param.d);
-
-        PIDController::control(err, dt, report);
+        return PIDController::control(err, dt, report);
     }
 
 };
