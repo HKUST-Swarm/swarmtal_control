@@ -13,4 +13,6 @@ geometry_msgs/Quaternion att_sp
 float64 yaw_sp
 float64 z_sp
 
+bool use_fc_yaw
+
 geometry_msgs/Vector3 max_vel

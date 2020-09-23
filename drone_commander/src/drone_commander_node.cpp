@@ -276,7 +276,7 @@ public:
     
     void send_ctrl_cmd();
 
-    void set_att_setpoint(double roll, double pitch, double yawrate, double z, bool z_use_vel=true, bool yaw_use_rate=true);
+    void set_att_setpoint(double roll, double pitch, double yawrate, double z, bool z_use_vel=true, bool yaw_use_rate=true, bool use_fc_yaw = false);
     void set_pos_setpoint(double x, double y, double z, double yaw=NAN, double vx_ff=0, double vy_ff=0, double vz_ff=0, double ax_ff=0, double ay_ff=0, double az_ff=0);
     void set_vel_setpoint(double vx, double vy, double vz, double yaw=NAN, double ax_ff=0, double ay_ff=0, double az_ff=0);
 
@@ -581,7 +581,9 @@ void DroneCommander::fc_attitude_callback(const geometry_msgs::QuaternionStamped
 
 }
 
-void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, double z, bool z_use_vel, bool yaw_use_rate) {
+void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, double z, bool z_use_vel, bool yaw_use_rate, bool use_fc_yaw) {
+
+    ctrl_cmd->use_fc_yaw = use_fc_yaw;
     if (yaw_use_rate) {
         yaw = ctrl_cmd->yaw_sp = ctrl_cmd->yaw_sp + yaw * LOOP_DURATION;
     } else {
@@ -618,6 +620,7 @@ void DroneCommander::set_pos_setpoint(double x, double y, double z, double yaw, 
     ctrl_cmd->acc_sp.x = ax_ff;
     ctrl_cmd->acc_sp.y = ay_ff;
     ctrl_cmd->acc_sp.z = az_ff;
+    ctrl_cmd->use_fc_yaw = false;
     if (!std::isnan(yaw)) {
         ctrl_cmd->yaw_sp = yaw;
     }
@@ -635,6 +638,8 @@ void DroneCommander::set_vel_setpoint(double vx, double vy, double vz, double ya
     if (!std::isnan(yaw)) {
         ctrl_cmd->yaw_sp = yaw;
     }
+
+    ctrl_cmd->use_fc_yaw = false;
 
     ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_VEL_MODE;
 }
@@ -895,7 +900,7 @@ void DroneCommander::process_rc_input () {
         case DCMD::CTRL_MODE_IDLE:        
         case DCMD::CTRL_MODE_ATT:
         default: {
-            set_att_setpoint(-x * RC_MAX_TILT_ANGLE, y* RC_MAX_TILT_ANGLE, r * RC_MAX_YAW_RATE, z);
+            set_att_setpoint(-y* RC_MAX_TILT_ANGLE, -x * RC_MAX_TILT_ANGLE,  r * RC_MAX_YAW_RATE, z, true, true, true);
             break;
         }
     }

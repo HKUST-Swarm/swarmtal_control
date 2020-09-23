@@ -323,6 +323,8 @@ public:
 
         state.max_vel = _cmd.max_vel;
 
+        state.use_fc_yaw = _cmd.use_fc_yaw;
+
         last_cmd_ts = ros::Time::now();
     }
 
@@ -407,8 +409,12 @@ public:
         // atti_out.yaw_sp = 0 ;
         // yaw_offset = 0;
 
-        double yaw_sp =  constrainAngle(atti_out.yaw_sp + yaw_offset);
-
+        double yaw_sp =  atti_out.yaw_sp;
+        if (!state.use_fc_yaw) {
+            yaw_sp = constrainAngle(atti_out.yaw_sp + yaw_offset);
+        } else {
+            printf("Control Using FC yaw");
+        }
         
         ROS_INFO("SPR %3.1f P %3.1f Y %3.1f (OSP%3.2f ODOM:%3.1f FC%3.1f) T %2.2f", 
            atti_out.roll_sp*57.3, 
