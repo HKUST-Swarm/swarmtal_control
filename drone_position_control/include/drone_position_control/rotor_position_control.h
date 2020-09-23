@@ -262,8 +262,8 @@ public:
         
         if (param.ctrl_frame == CTRL_FRAME::VEL_WORLD_ACC_WORLD) {
             //Convert to body frame first
-            Eigen::Quaterniond yaw_transverse(Eigen::AngleAxisd(yaw_now, Vector3d::UnitZ()));
-            acc_sp = yaw_transverse.inverse() * acc_sp;
+            Eigen::Quaterniond yaw_transverse(Eigen::AngleAxisd(-yaw_now, Vector3d::UnitZ()));
+            acc_sp = yaw_transverse * acc_sp;
         }
 
         if(param.coor_sys == FRAME_COOR_SYS::FLU) {

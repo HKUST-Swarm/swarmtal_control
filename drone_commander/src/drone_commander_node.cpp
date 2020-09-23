@@ -590,11 +590,7 @@ void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, dou
         ctrl_cmd->yaw_sp = yaw;
     }
 
-    ROS_INFO("Att z %f", z);
-    
-    Quaterniond quat_sp = AngleAxisd(roll, Vector3d::UnitX())
-        * AngleAxisd(pitch, Vector3d::UnitY())
-        * AngleAxisd(yaw, Vector3d::UnitZ());
+    Quaterniond quat_sp = AngleAxisd(yaw, Vector3d::UnitZ()) * AngleAxisd(pitch, Vector3d::UnitY()) * AngleAxisd(roll, Vector3d::UnitX());
     
     ctrl_cmd->att_sp.w = quat_sp.w();
     ctrl_cmd->att_sp.x = quat_sp.x();
@@ -900,6 +896,7 @@ void DroneCommander::process_rc_input () {
         case DCMD::CTRL_MODE_IDLE:        
         case DCMD::CTRL_MODE_ATT:
         default: {
+            reset_yaw_sp();
             set_att_setpoint(-y* RC_MAX_TILT_ANGLE, -x * RC_MAX_TILT_ANGLE,  r * RC_MAX_YAW_RATE, z, true, true, true);
             break;
         }

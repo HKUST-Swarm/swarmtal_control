@@ -410,24 +410,26 @@ public:
         // yaw_offset = 0;
 
         double yaw_sp =  atti_out.yaw_sp;
+        double roll_sp = atti_out.roll_sp;
+        double pitch_sp = atti_out.pitch_sp;
+        
         if (!state.use_fc_yaw) {
-            yaw_sp = constrainAngle(atti_out.yaw_sp + yaw_offset);
-        } else {
-            printf("Control Using FC yaw");
+            yaw_sp = yaw_sp + yaw_offset;
         }
         
-        ROS_INFO("SPR %3.1f P %3.1f Y %3.1f (OSP%3.2f ODOM:%3.1f FC%3.1f) T %2.2f", 
-           atti_out.roll_sp*57.3, 
-           atti_out.pitch_sp*57.3,
+        ROS_INFO("SPR %3.1f P %3.1f Y %3.1f (OSP%3.2f ODOM:%3.1f FC%3.1f) T %2.2f YAW OFFSET %2.2f", 
+           roll_sp*57.3, 
+           pitch_sp*57.3,
            yaw_sp*57.3,
            atti_out.yaw_sp*57.3,
            yaw_odom*57.3,
            yaw_fc*57.3,
-           atti_out.thrust_sp
+           atti_out.thrust_sp,
+           yaw_offset
         );
     
-        dji_command_so3.axes.push_back(atti_out.roll_sp);       // x
-        dji_command_so3.axes.push_back(atti_out.pitch_sp);       // y
+        dji_command_so3.axes.push_back(roll_sp);       // x
+        dji_command_so3.axes.push_back(pitch_sp);       // y
         if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_THRUST) {
             atti_out.thrust_sp = float_constrain(atti_out.thrust_sp, 0.02, thrust_limit);
             dji_command_so3.axes.push_back(atti_out.thrust_sp*100); // z
