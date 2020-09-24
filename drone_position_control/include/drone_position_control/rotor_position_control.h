@@ -127,6 +127,8 @@ class RotorPositionControl {
     bool acc_inited = false;
     bool att_inited = false;
 
+    double yaw;
+
     Eigen::Vector3d euler_rpy = Eigen::Vector3d(0, 0, 0);
 
 public:
@@ -185,7 +187,11 @@ public:
 
         yaw_transverse = Eigen::AngleAxisd(euler_rpy.z(), Vector3d::UnitZ());
 
+        printf("QUAT %f %f %f %f RPY %f %f %f\n", quat.w(), quat.x(), quat.y(), quat.z(), euler_rpy.x(), euler_rpy.y(), euler_rpy.z());
+
         att_inited = true;
+
+        yaw = euler_rpy.z();
     }
 
     virtual double control_pos_z(const double z_sp, double dt) {
@@ -195,12 +201,26 @@ public:
     virtual Eigen::Vector3d control_pos(const Eigen::Vector3d & pos_sp, double dt) {
         Eigen::Vector3d vel_sp(0, 0, 0);
         if (pos_inited) {
-            vel_sp.x() = float_constrain(px_con.control2(pos_sp.x(), pos.x(), dt), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
-            vel_sp.y() = float_constrain(py_con.control2(pos_sp.y(), pos.y(), dt), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
-            vel_sp.z() = float_constrain(control_pos_z(pos_sp.z(), dt), -MAX_VERTICAL_VEL, MAX_VERTICAL_VEL);
+            Eigen::Vector3d pos_sp_body = yaw_transverse.inverse() * pos_sp;
+            Eigen::Vector3d pos_body = yaw_transverse.inverse() * pos;
+
+            printf("CTRL POS %f %f SP %f %f POSBDY %f %f POSBDYSP %f %f YAW %f\n",
+                pos.x(), pos.y(),
+                pos_sp.x(), pos_sp.y(),
+                pos_body.x(), pos_body.y(),
+                pos_sp_body.x(), pos_sp_body.y(),
+                yaw
+            );
+
+            vel_sp.x() = float_constrain(px_con.control2(pos_sp_body.x(), pos_body.x(), dt, true), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
+            vel_sp.y() = float_constrain(py_con.control2(pos_sp_body.y(), pos_body.y(), dt), -MAX_HORIZON_VEL, MAX_HORIZON_VEL);
+            vel_sp.z() = float_constrain(control_pos_z(pos_sp_body.z(), dt), -MAX_VERTICAL_VEL, MAX_VERTICAL_VEL);
 
             if (param.ctrl_frame == VEL_BODY_ACC_BODY) {
-                vel_sp = quat.inverse() * vel_sp;
+            } else {
+                // printf("Transfer vel sp to world; body %f %f %f", vel_sp.x(), vel_sp.y(), vel_sp.z());
+                vel_sp = yaw_transverse * vel_sp;
+                // printf("World vel %f %f %f", vel_sp.x(), vel_sp.y(), vel_sp.z());
             }
         }
 
@@ -230,12 +250,23 @@ public:
     virtual Eigen::Vector3d control_vel(const Eigen::Vector3d & vel_sp, double dt, bool input_body_frame=true, bool output_body_frame=true) {
         Eigen::Vector3d acc_sp(0, 0, 0);
         if (vel_inited) {
-            acc_sp.x() = float_constrain(vx_con.control2(vel_sp.x(), vel.x(), dt), -MAX_HORIZON_ACC, MAX_HORIZON_ACC);
-            acc_sp.y() = float_constrain(vy_con.control2(vel_sp.y(), vel.y(), dt), -MAX_HORIZON_ACC, MAX_HORIZON_ACC);
+
+            Eigen::Vector3d vel_sp_body = vel_sp;
+            Eigen::Vector3d vel_body = vel;
+            if (param.ctrl_frame == CTRL_FRAME::VEL_WORLD_ACC_BODY || param.ctrl_frame == CTRL_FRAME::VEL_WORLD_ACC_WORLD) {
+                vel_sp_body = yaw_transverse.inverse() * vel_sp;
+                vel_body = yaw_transverse.inverse() * vel;
+                // printf("Transfer vel sp from world; Body %f %f %f\n", vel_sp_body.x(), vel_sp_body.y(), vel_sp_body.z());
+            }
+
+            acc_sp.x() = float_constrain(vx_con.control2(vel_sp_body.x(), vel_body.x(), dt), -MAX_HORIZON_ACC, MAX_HORIZON_ACC);
+            acc_sp.y() = float_constrain(vy_con.control2(vel_sp_body.y(), vel_body.y(), dt), -MAX_HORIZON_ACC, MAX_HORIZON_ACC);
             acc_sp.z() = float_constrain(control_vel_z(vel_sp.z(), dt), -MAX_VERTICAL_ACC, MAX_VERTICAL_ACC);
 
-            if (param.ctrl_frame == CTRL_FRAME::VEL_WORLD_ACC_BODY) {
-                acc_sp = yaw_transverse.inverse() * acc_sp;
+            if (param.ctrl_frame == CTRL_FRAME::VEL_WORLD_ACC_WORLD) {
+                // printf("Transfer acc sp to world; Body %f %f %f\n", acc_sp.x(), acc_sp.y(), acc_sp.z());
+                acc_sp = yaw_transverse * acc_sp;
+
             }
         }
 
@@ -261,9 +292,8 @@ public:
         double yaw_sp = euler_rpy.z();
         
         if (param.ctrl_frame == CTRL_FRAME::VEL_WORLD_ACC_WORLD) {
-            //Convert to body frame first
-            Eigen::Quaterniond yaw_transverse(Eigen::AngleAxisd(-yaw_now, Vector3d::UnitZ()));
-            acc_sp = yaw_transverse * acc_sp;
+            acc_sp = yaw_transverse.inverse() * acc_sp;
+            printf("Transfer acc sp from world; %f %f %f\n", acc_sp.x(), acc_sp.y(), acc_sp.z());
         }
 
         if(param.coor_sys == FRAME_COOR_SYS::FLU) {

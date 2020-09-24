@@ -102,8 +102,11 @@ public:
             err_integrate = -param.max_err_i;
         }
 
-        if (report)
-            printf("ERR %3.2f ERRI %3.2f OUTPUTI %3.2f OUTPUT %3.2f\n",  (param.b*r - y) , err_integrate,  err_integrate * param.i, ret);
+        if (report) {
+            printf("DT[%f] R %f Y %f ERR %3.2f ERRI %3.2f OUTPUTI %3.2f ERRD_F %3.2f OUTPUTD %3.2f OFFSET %3.2f OUTPUT %3.2f\n",
+                dt, r, y, (param.b*r - y) , err_integrate,  err_integrate * param.i, 
+                    err_d_filtered, err_d_filtered * param.d, offset,  ret);
+        }
 
         return ret;
  

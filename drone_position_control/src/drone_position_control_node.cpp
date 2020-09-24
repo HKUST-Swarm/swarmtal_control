@@ -46,6 +46,7 @@ class DronePosControl {
     Quaterniond att_sp;
     float z_sp = 0;
 
+    //RPY, this is in NED
     Eigen::Vector3d odom_att_rpy;
     Eigen::Vector3d fc_att_rpy;
 
@@ -151,11 +152,15 @@ class DronePosControl {
         nh.param<double>("odom_gc_pos/z", odom_gc_pos.z(), 0);
     }
     ros::Timer control_timer;
-
+    Eigen::Matrix3d R_FLU2FRD; 
+    Eigen::Matrix3d R_ENU2NED;
 
 public:
     DronePosControl(ros::NodeHandle & _nh):
     nh(_nh) {
+        R_FLU2FRD << 1, 0, 0, 0, -1, 0, 0, 0, -1;
+        R_ENU2NED << 0, 1, 0, 1, 0, 0, 0, 0, -1;
+
         RotorPosCtrlParam ctrlP;
 
         ctrlP.ctrl_frame = CTRL_FRAME::VEL_WORLD_ACC_WORLD;
@@ -216,10 +221,7 @@ public:
 
     void on_imu_data(const sensor_msgs::Imu & _imu) {
 
-        Eigen::Matrix3d R_FLU2FRD; 
-        R_FLU2FRD << 1, 0, 0, 0, -1, 0, 0, 0, -1;
-        Eigen::Matrix3d R_ENU2NED;
-        R_ENU2NED << 0, 1, 0, 1, 0, 0, 0, 0, -1;
+
 
         state.imu_data = _imu;
         Eigen::Vector3d acc(
@@ -256,11 +258,11 @@ public:
             rpy.z()*57.3
         );
         */
-        pos_ctrl->set_attitude(q);
+        // pos_ctrl->set_attitude(q);
 
     }
 
-    void set_drone_global_pos_vel(Eigen::Vector3d pos, Eigen::Vector3d vel) {
+    void set_drone_global_pos_vel_att(Eigen::Vector3d pos, Eigen::Vector3d vel, Eigen::Quaterniond quat) {
         pos_ctrl->set_pos(pos);
         pos_ctrl->set_global_vel(vel);
 
@@ -272,6 +274,7 @@ public:
         state.global_vel.y = vel.y();
         state.global_vel.z = vel.z();
 
+        pos_ctrl->set_attitude(quat);
     }
 
     void OnSwarmPosCommand(const swarmtal_msgs::drone_pos_ctrl_cmd & _cmd) {
@@ -373,20 +376,18 @@ public:
         Eigen::Quaterniond quat(pose.orientation.w, 
             pose.orientation.x, pose.orientation.y, pose.orientation.z);
         
-        // ROS_INFO("original pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
-        //ROS_INFO("original vel %3.3f %3.3f %3.3f", vel.x(), vel.y(), vel.z());
+
         pos = pos - quat*odom_gc_pos;
         vel = vel - omgx*quat.toRotationMatrix()*odom_gc_pos;
-        // ROS_INFO("transfed pos %3.2f %3.2f %3.2f", pos.x(), pos.y(), pos.z());
-        //ROS_INFO("transfed vel %3.3f %3.3f %3.3f", vel.x(), vel.y(), vel.z());
 
-        pos_ctrl->set_pos(pos);
-        pos_ctrl->set_global_vel(vel);
-        pos_ctrl->set_attitude(quat);
-        set_drone_global_pos_vel(pos, vel);
+        set_drone_global_pos_vel_att(pos, vel, quat);
 
-        odom_att_rpy = quat2eulers(quat);
-        yaw_odom = -odom_att_rpy.z(); //Odom is also FLU, but we want NED RPY
+        Eigen::Matrix3d RFLU2ENU = quat.toRotationMatrix();
+        Eigen::Quaterniond q_ned = Eigen::Quaterniond(R_ENU2NED*RFLU2ENU*R_FLU2FRD.transpose());
+
+        //Odometry att in rpy, this is in NED
+        odom_att_rpy = quat2eulers(q_ned);
+        yaw_odom = odom_att_rpy.z(); //Odom is also FLU, but we want NED RPY for FC Fix and output
         yaw_offset = constrainAngle(yaw_fc - yaw_odom);
     }
 
