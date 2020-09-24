@@ -110,9 +110,12 @@ if __name__ == "__main__":
 
 
         while not rospy.is_shutdown():
-            send(cmd, args, pub)
-            rate.sleep()
-
+            try:
+                send(cmd, args, pub)
+                rate.sleep()
+            except KeyboardInterrupt:
+                exit(0)
+                
     elif args.command_type == "circle" or args.command_type == "circle_yaw":
         cmd.command_type = drone_onboard_command.CTRL_POS_COMMAND
         print("Will draw circle @ origin {} {} {}, r {} T {}".format(
