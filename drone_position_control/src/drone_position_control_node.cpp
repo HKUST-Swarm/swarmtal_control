@@ -382,12 +382,8 @@ public:
 
         set_drone_global_pos_vel_att(pos, vel, quat);
 
-        Eigen::Matrix3d RFLU2ENU = quat.toRotationMatrix();
-        Eigen::Quaterniond q_ned = Eigen::Quaterniond(R_ENU2NED*RFLU2ENU*R_FLU2FRD.transpose());
-
-        //Odometry att in rpy, this is in NED
-        odom_att_rpy = quat2eulers(q_ned);
-        yaw_odom = odom_att_rpy.z(); //Odom is also FLU, but we want NED RPY for FC Fix and output
+        odom_att_rpy = quat2eulers(quat);
+        yaw_odom = - odom_att_rpy.z(); //Odom is also FLU, but we want NED RPY for FC Fix and output
         yaw_offset = constrainAngle(yaw_fc - yaw_odom);
     }
 
@@ -418,16 +414,16 @@ public:
             yaw_sp = yaw_sp + yaw_offset;
         }
         
-        ROS_INFO("SPR %3.1f P %3.1f Y %3.1f (OSP%3.2f ODOM:%3.1f FC%3.1f) T %2.2f YAW OFFSET %2.2f", 
-           roll_sp*57.3, 
-           pitch_sp*57.3,
-           yaw_sp*57.3,
-           atti_out.yaw_sp*57.3,
-           yaw_odom*57.3,
-           yaw_fc*57.3,
-           atti_out.thrust_sp,
-           yaw_offset
-        );
+        // ROS_INFO("SPR %3.1f P %3.1f Y %3.1f (OSP%3.2f ODOM:%3.1f FC%3.1f) T %2.2f YAW OFFSET %2.2f", 
+        //    roll_sp*57.3, 
+        //    pitch_sp*57.3,
+        //    yaw_sp*57.3,
+        //    atti_out.yaw_sp*57.3,
+        //    yaw_odom*57.3,
+        //    yaw_fc*57.3,
+        //    atti_out.thrust_sp,
+        //    yaw_offset
+        // );
     
         dji_command_so3.axes.push_back(roll_sp);       // x
         dji_command_so3.axes.push_back(pitch_sp);       // y
@@ -485,7 +481,7 @@ public:
             acc_sp.z() = float_constrain(acc_sp.z(), -MAX_ACC, MAX_ACC);
 
 
-            atti_out =  pos_ctrl->control_acc(acc_sp, yaw_cmd, dt, odom_att_rpy.z());
+            atti_out =  pos_ctrl->control_acc(acc_sp, yaw_cmd, dt);
 #ifdef USE_DJI_THRUST_CTRL
             // ROS_INFO("Using direct velocity mode");
             atti_out.thrust_sp = vel_sp.z();
