@@ -16,7 +16,7 @@ def send(cmd, args, pub):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='A easy command tool for sending command to swarm drone')
     parser.add_argument('command_type', metavar='command_type', choices=
-        ["takeoff", "landing", "emland", "flyto", "arm", "disarm", "joy_control", "circle", "sweep", "csv"], help="Type of command to send")
+        ["takeoff", "landing", "emland", "flyto", "arm", "disarm", "joy_control", "circle", "circle_yaw", "sweep", "csv"], help="Type of command to send")
     parser.add_argument("-c","--center", nargs=3, type=float, help="center for circle", default=[0, 0, 1])
     parser.add_argument("-r","--radius", type=float, help="radius for circle", default=0.5)
     parser.add_argument("-t","--cycle", type=float, help="cycle for circle or for sweep a cycle", default=30)
@@ -113,7 +113,7 @@ if __name__ == "__main__":
             send(cmd, args, pub)
             rate.sleep()
 
-    elif args.command_type == "circle":
+    elif args.command_type == "circle" or args.command_type == "circle_yaw":
         cmd.command_type = drone_onboard_command.CTRL_POS_COMMAND
         print("Will draw circle @ origin {} {} {}, r {} T {}".format(
             args.center[0],
@@ -142,31 +142,37 @@ if __name__ == "__main__":
         cmd.param10 = 0
 
         t = 0
+        yaw = 666666
         while not rospy.is_shutdown():
-            x = ox + math.sin(t*math.pi*2/T)*r
-            y = oy + math.cos(t*math.pi*2/T)*r
-            vx = math.cos(t*math.pi*2/T) * r * math.pi*2/T
-            vy = -math.sin(t*math.pi*2/T) * r * math.pi*2/T
-            yaw = t*math.pi*2/T
-            ax = - math.sin(t*math.pi*2/T) * r * math.pi*2/T * math.pi*2/T
-            ay = - math.cos(t*math.pi*2/T) * r * math.pi*2/T * math.pi*2/T
+            try:
+                x = ox + math.sin(t*math.pi*2/T)*r
+                y = oy + math.cos(t*math.pi*2/T)*r
+                vx = math.cos(t*math.pi*2/T) * r * math.pi*2/T
+                vy = -math.sin(t*math.pi*2/T) * r * math.pi*2/T
+                if args.command_type == "circle_yaw":
+                    yaw = t*math.pi*2/T
+                ax = - math.sin(t*math.pi*2/T) * r * math.pi*2/T * math.pi*2/T
+                ay = - math.cos(t*math.pi*2/T) * r * math.pi*2/T * math.pi*2/T
 
-            cmd.param1 = int(x*10000)
-            cmd.param2 = int(y*10000)
-            cmd.param3 = int(oz*10000)
-            cmd.param4 = int(yaw*10000)
-            cmd.param5 = int(vx*10000)
-            cmd.param6 = int(vy*10000)
-            cmd.param7 = 0
+                cmd.param1 = int(x*10000)
+                cmd.param2 = int(y*10000)
+                cmd.param3 = int(oz*10000)
+                if args.command_type == "circle_yaw":
+                    cmd.param4 = int(yaw*10000)
+                cmd.param5 = int(vx*10000)
+                cmd.param6 = int(vy*10000)
+                cmd.param7 = 0
 
-            cmd.param8 = int(ax*10000)
-            cmd.param9 = int(ay*10000)
+                cmd.param8 = int(ax*10000)
+                cmd.param9 = int(ay*10000)
 
-            rospy.loginfo("{:3.2f} xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f} {:3.2f} {:3.2f}".format(t, x, y, oz, vx, vy, ax, ay))
-            send(cmd, args, pub)
-            t = t + 0.02
-            rate.sleep()
+                rospy.loginfo("{:3.2f} xyz {:3.2f} {:3.2f} {:3.2f} Y {:3.2f} ff {:3.2f} {:3.2f} {:3.2f} {:3.2f}".format(t, x, y, oz, yaw, vx, vy, ax, ay))
+                send(cmd, args, pub)
+                t = t + 0.02
+                rate.sleep()
 
+            except KeyboardInterrupt:
+                exit(0)
 
     elif args.command_type == "csv":
         cmd.command_type = drone_onboard_command.CTRL_POS_COMMAND
@@ -237,40 +243,43 @@ if __name__ == "__main__":
         count = 0
 
         while not rospy.is_shutdown() and count < args.count:
-            x0 = args.center[0]
-            y0 = args.center[1]
-            z0 = args.center[2]
+            try:
+                x0 = args.center[0]
+                y0 = args.center[1]
+                z0 = args.center[2]
 
-            vx = 0
-            vy = 0
-            vz = 0
+                vx = 0
+                vy = 0
+                vz = 0
 
-            x = x0
-            y = y0
-            z = z0
+                x = x0
+                y = y0
+                z = z0
 
-            if args.axis == 0:
-                vx = func(t) * args.amp
-                x = func(t) * args.amp + x0
-            elif args.axis == 1:
-                vy = func(t) * args.amp
-                y = func(t) * args.amp + y0
-            elif args.axis == 2:
-                vz = func(t) * args.amp
-                z = func(t) * args.amp + z0
+                if args.axis == 0:
+                    vx = func(t) * args.amp
+                    x = func(t) * args.amp + x0
+                elif args.axis == 1:
+                    vy = func(t) * args.amp
+                    y = func(t) * args.amp + y0
+                elif args.axis == 2:
+                    vz = func(t) * args.amp
+                    z = func(t) * args.amp + z0
 
-            cmd.param1 = int(x*10000)
-            cmd.param2 = int(y*10000)
-            cmd.param3 = int(z*10000)
-            cmd.param5 = int(vx*10000)
-            cmd.param6 = int(vy*10000)
-            cmd.param7 = int(vz*10000)
+                cmd.param1 = int(x*10000)
+                cmd.param2 = int(y*10000)
+                cmd.param3 = int(z*10000)
+                cmd.param5 = int(vx*10000)
+                cmd.param6 = int(vy*10000)
+                cmd.param7 = int(vz*10000)
 
-            print("[{}:{:3.2f}] Sweeping.... xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f} {:3.2f}".format(count, t, x, y, z, vx, vy, vz))
-            send(cmd, args, pub)
-            t = t + 0.02
-            if t > args.cycle:
-                count = count + 1
-                t = 0
-            rate.sleep()
-        print("Finish sweep, stop")
+                print("[{}:{:3.2f}] Sweeping.... xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f} {:3.2f}".format(count, t, x, y, z, vx, vy, vz))
+                send(cmd, args, pub)
+                t = t + 0.02
+                if t > args.cycle:
+                    count = count + 1
+                    t = 0
+                rate.sleep()
+                print("Finish sweep, stop")
+            except KeyboardInterrupt:
+                exit(0) 
