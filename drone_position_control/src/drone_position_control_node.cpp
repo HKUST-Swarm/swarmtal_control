@@ -322,7 +322,7 @@ public:
 
         state.ctrl_mode = _cmd.ctrl_mode;
 
-        state.yaw_sp = _cmd.yaw_sp;
+        state.yaw_sp =  constrainAngle(_cmd.yaw_sp);
 
         state.max_vel = _cmd.max_vel;
 
@@ -411,7 +411,7 @@ public:
         double pitch_sp = atti_out.pitch_sp;
         
         if (!state.use_fc_yaw) {
-            yaw_sp = yaw_sp + yaw_offset;
+            yaw_sp = constrainAngle(yaw_sp + yaw_offset);
         }
         
         // ROS_INFO("SPR %3.1f P %3.1f Y %3.1f (OSP%3.2f ODOM:%3.1f FC%3.1f) T %2.2f YAW OFFSET %2.2f", 

@@ -100,6 +100,13 @@ const double superexpo(const double &value, double e = 0.5, double g = 0.5)
 }
 
 
+inline double constrainAngle(double x){
+    x = fmod(x + M_PI, 2*M_PI);
+    if (x < 0)
+        x += 2*M_PI;
+    return x - M_PI;
+}
+
 inline Eigen::Vector3d quat2eulers(Eigen::Quaterniond quat);
 class DroneCommander {
     ros::NodeHandle & nh;
@@ -585,9 +592,9 @@ void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, dou
 
     ctrl_cmd->use_fc_yaw = use_fc_yaw;
     if (yaw_use_rate) {
-        yaw = ctrl_cmd->yaw_sp = ctrl_cmd->yaw_sp + yaw * LOOP_DURATION;
+        yaw = ctrl_cmd->yaw_sp = constrainAngle(ctrl_cmd->yaw_sp + yaw * LOOP_DURATION);
     } else {
-        ctrl_cmd->yaw_sp = yaw;
+        ctrl_cmd->yaw_sp = constrainAngle(yaw);
     }
 
     Quaterniond quat_sp = AngleAxisd(yaw, Vector3d::UnitZ()) * AngleAxisd(pitch, Vector3d::UnitY()) * AngleAxisd(roll, Vector3d::UnitX());
@@ -618,7 +625,7 @@ void DroneCommander::set_pos_setpoint(double x, double y, double z, double yaw, 
     ctrl_cmd->acc_sp.z = az_ff;
     ctrl_cmd->use_fc_yaw = false;
     if (!std::isnan(yaw)) {
-        ctrl_cmd->yaw_sp = yaw;
+        ctrl_cmd->yaw_sp = constrainAngle(yaw);
     }
 
     ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_POS_MODE;
@@ -632,7 +639,7 @@ void DroneCommander::set_vel_setpoint(double vx, double vy, double vz, double ya
     ctrl_cmd->acc_sp.y = ay_ff;
     ctrl_cmd->acc_sp.z = az_ff;
     if (!std::isnan(yaw)) {
-        ctrl_cmd->yaw_sp = yaw;
+        ctrl_cmd->yaw_sp = constrainAngle(yaw);
     }
 
     ctrl_cmd->use_fc_yaw = false;
@@ -874,7 +881,7 @@ void DroneCommander::process_rc_input () {
 
     switch (state.commander_ctrl_mode) {
         case DCMD::CTRL_MODE_POSVEL: {
-            ctrl_cmd->yaw_sp = ctrl_cmd->yaw_sp + r * RC_MAX_YAW_RATE * LOOP_DURATION;
+            ctrl_cmd->yaw_sp =  constrainAngle(ctrl_cmd->yaw_sp + r * RC_MAX_YAW_RATE * LOOP_DURATION);
             double vxd = x * RC_MAX_TILT_VEL;
             double vyd = y * RC_MAX_TILT_VEL;
             ctrl_cmd->vel_sp.x = vxd * cos(yaw_vo) + vyd*sin(yaw_vo);
