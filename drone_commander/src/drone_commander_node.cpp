@@ -169,6 +169,7 @@ class DroneCommander {
 
     double landing_thrust = 0.03;
 
+    bool pos_sp_inited = false;
 
 public:
     DroneCommander(ros::NodeHandle & _nh):
@@ -884,10 +885,22 @@ void DroneCommander::process_rc_input () {
             ctrl_cmd->yaw_sp =  constrainAngle(ctrl_cmd->yaw_sp + r * RC_MAX_YAW_RATE * LOOP_DURATION);
             double vxd = x * RC_MAX_TILT_VEL;
             double vyd = y * RC_MAX_TILT_VEL;
+
             ctrl_cmd->vel_sp.x = vxd * cos(yaw_vo) + vyd*sin(yaw_vo);
             ctrl_cmd->vel_sp.y = -vxd * sin(yaw_vo) + vyd*cos(yaw_vo);
             ctrl_cmd->vel_sp.z = z * RC_MAX_Z_VEL;
-            ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_VEL_MODE;
+
+            if (!pos_sp_inited) {
+                ctrl_cmd->pos_sp.x = odometry.pose.pose.position.x;
+                ctrl_cmd->pos_sp.y = odometry.pose.pose.position.y;
+                ctrl_cmd->pos_sp.z = odometry.pose.pose.position.z;
+                pos_sp_inited = true;
+            }
+            ctrl_cmd->pos_sp.x = ctrl_cmd->pos_sp.x + ctrl_cmd->vel_sp.x * LOOP_DURATION;
+            ctrl_cmd->pos_sp.y = ctrl_cmd->pos_sp.y + ctrl_cmd->vel_sp.y * LOOP_DURATION;
+            ctrl_cmd->pos_sp.z = ctrl_cmd->pos_sp.z + ctrl_cmd->vel_sp.z * LOOP_DURATION;
+
+            ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_POS_MODE;
 
             break;
         }
@@ -1211,6 +1224,10 @@ void DroneCommander::process_control_mode() {
 }
 
 void DroneCommander::send_ctrl_cmd() {
+    if (ctrl_cmd->ctrl_mode != DPCL::CTRL_CMD_POS_MODE) {
+        pos_sp_inited = false;
+    }
+
     ctrl_cmd_pub.publish(*ctrl_cmd);
 }
 

@@ -147,12 +147,14 @@ if __name__ == "__main__":
             y = oy + math.cos(t*math.pi*2/T)*r
             vx = math.cos(t*math.pi*2/T) * r * math.pi*2/T
             vy = -math.sin(t*math.pi*2/T) * r * math.pi*2/T
+            yaw = t*math.pi*2/T
             ax = - math.sin(t*math.pi*2/T) * r * math.pi*2/T * math.pi*2/T
             ay = - math.cos(t*math.pi*2/T) * r * math.pi*2/T * math.pi*2/T
 
             cmd.param1 = int(x*10000)
             cmd.param2 = int(y*10000)
             cmd.param3 = int(oz*10000)
+            cmd.param4 = int(yaw*10000)
             cmd.param5 = int(vx*10000)
             cmd.param6 = int(vy*10000)
             cmd.param7 = 0
