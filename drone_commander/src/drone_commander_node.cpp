@@ -12,6 +12,7 @@
 #include <std_msgs/UInt8.h>
 #include <math.h>
 #include <sensor_msgs/BatteryState.h>
+#include <sensor_msgs/Imu.h>
 
 #if FCHardware == DJI_SDK
 #include <dji_sdk/ControlDevice.h>
@@ -52,12 +53,12 @@ using namespace Eigen;
 #define MAX_TRY_ARM_TIMES 5
 
 #define MAX_LOSS_ONBOARD_CMD 60
-#define LANDING_ATT_MODE_HEIGHT 0.3
+#define LANDING_ATT_MODE_HEIGHT 0.1
 #define LANDING_ATT_MIN_HEIGHT 0.1
 
 #define LOOP_DURATION 0.02
 
-#define DEBUG_OUTPUT
+// #define DEBUG_OUTPUT
 #define DEBUG_HOVER_CTRL
 
 #define MAGIC_YAW_NAN 666666
@@ -71,7 +72,9 @@ using namespace Eigen;
 #define BATTERY_REMAIN_CUTOFF 240.0f
 #define BATTERY_REMAIN_PARAM_A 345.375f 
 #define BATTERY_REMAIN_PARAM_B -4757.3f
-#define LANDING_VEL_Z_BATTERY_LOW -1.0
+#define BATTERY_THRUST_A -0.005555555555555558f 
+#define BATTERY_THRUST_B 0.18333333333333338f
+#define LANDING_VEL_Z_BATTERY_LOW -0.5
 
 inline double float_constrain(double v, double min, double max)
 {
@@ -83,7 +86,6 @@ inline double float_constrain(double v, double min, double max)
     }
     return v;
 }
-
 
 double expo(const double &value, const double &e)
 {
@@ -119,6 +121,7 @@ class DroneCommander {
     ros::Subscriber ctrl_dev_sub;
     ros::Subscriber fc_att_sub;
     ros::Subscriber bat_sub;
+    ros::Subscriber imu_data_sub;
 
     ros::Timer loop_timer;
 
@@ -166,8 +169,11 @@ class DroneCommander {
     bool in_fc_landing = false;
 
     bool is_landing_tail = false;
+    bool is_touch_ground = false;
 
-    double landing_thrust = 0.03;
+
+    double landing_thrust = 0.035;
+    double landing_thrust_min = 0.035, landing_thrust_max = 0.06;
 
     bool pos_sp_inited = false;
 
@@ -203,7 +209,9 @@ public:
         loop_timer = nh.createTimer(ros::Duration(LOOP_DURATION), &DroneCommander::loop, this);
 
         nh.param<bool>("rc_fail_detection", rc_fail_detection, true);
-        nh.param<double>("landing_thrust", landing_thrust, 0.0);
+        nh.param<double>("landing_thrust_min", landing_thrust_min, 0.0);
+        nh.param<double>("landing_thrust_max", landing_thrust_max, 0.0);
+
 
         if (rc_fail_detection) {
             ROS_INFO("Will detect RC fail");
@@ -233,6 +241,7 @@ public:
         ctrl_dev_sub = nh.subscribe("control_device", 1, &DroneCommander::ctrl_dev_callback, this, ros::TransportHints().tcpNoDelay());
         fc_att_sub = nh.subscribe("fc_attitude", 1, &DroneCommander::fc_attitude_callback, this, ros::TransportHints().tcpNoDelay());
         bat_sub = nh.subscribe("battery", 1, &DroneCommander::battery_callback, this,  ros::TransportHints().tcpNoDelay());
+        imu_data_sub = nh.subscribe("fc_imu", 1, &DroneCommander::on_imu_data, this, ros::TransportHints().tcpNoDelay());
     }
 
     void vo_callback(const nav_msgs::Odometry & _odom);
@@ -243,6 +252,7 @@ public:
     void fc_attitude_callback(const geometry_msgs::QuaternionStamped & _quat);
     void loop(const ros::TimerEvent & _e);
     void battery_callback(const sensor_msgs::BatteryState & _bat);
+    void on_imu_data(const sensor_msgs::Imu & _imu);
 
     bool is_odom_valid(const nav_msgs::Odometry & _odom);
     bool is_rc_valid(const sensor_msgs::Joy & _rc);
@@ -328,7 +338,7 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
             rc.axes[2],
             rc.axes[3],
             rc.axes[4],
-             rc.axes[5]
+            rc.axes[5]
         );
 
         ROS_INFO("POS     %3.2f      %3.2f     %3.2f TGT %3.2f %3.2f %3.2f\nctrl_input_state %d, flight_status %d\n control_auth %d  ctrl_mode %d, is_armed %d\n rc_valid %d onboard_cmd_valid %d vo_valid%d sdk_valid %d ",
@@ -589,6 +599,18 @@ void DroneCommander::fc_attitude_callback(const geometry_msgs::QuaternionStamped
 
 }
 
+void DroneCommander::on_imu_data(const sensor_msgs::Imu & _imu) {
+
+    state.imu_data = _imu;
+    // ROS_INFO("Imu data acc z: %f", state.imu_data.linear_acceleration.z);
+    return;
+    // Eigen::Vector3d acc(
+    //     state.imu_data.linear_acceleration.x,
+    //     state.imu_data.linear_acceleration.y,
+    //     state.imu_data.linear_acceleration.z
+    // );
+}
+
 void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, double z, bool z_use_vel, bool yaw_use_rate, bool use_fc_yaw) {
 
     ctrl_cmd->use_fc_yaw = use_fc_yaw;
@@ -744,6 +766,8 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
                     state.landing_mode = DCMD::LANDING_MODE_ATT;
                 } else {
                     state.landing_mode = DCMD::LANDING_MODE_XYVEL;
+                    is_landing_tail = false;
+                    is_touch_ground = false;
                 }
 
                 state.landing_velocity = -((double)_cmd.param2) / 10000.0;
@@ -1020,6 +1044,7 @@ void DroneCommander::process_control_takeoff() {
     //TODO: write takeoff scirpt
     bool is_in_air = state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR;
     bool is_takeoff_finish = false;
+    auto pos = odometry.pose.pose.position;
 
     if (state.control_auth != DCMD::CTRL_AUTH_THIS) {
         //Abort takeoff
@@ -1039,7 +1064,6 @@ void DroneCommander::process_control_takeoff() {
         try_arm(true);
     }
     if (state.vo_valid) {
-        auto pos = odometry.pose.pose.position;
         if (fabs(pos.x - takeoff_origin.x())< MAX_AUTO_TILT_ERROR && 
             fabs(pos.y - takeoff_origin.y()) < MAX_AUTO_TILT_ERROR && 
             fabs(pos.z - (takeoff_origin.z() + state.takeoff_target_height)) < MAX_AUTO_Z_ERROR) {
@@ -1053,7 +1077,7 @@ void DroneCommander::process_control_takeoff() {
     }
 
     if (!takeoff_inited) {
-        if (state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) {
+        if (state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR && pos.z > MIN_TAKEOFF_HEIGHT) {
             ROS_INFO("Already in air");
             is_takeoff_finish = true;
         }
@@ -1110,25 +1134,49 @@ void DroneCommander::process_control_landing() {
     //TODO: write better landing
     bool is_landing_finish = state.flight_status < DCMD::FLIGHT_STATUS_IN_AIR;
 
+    // if acc.z > 12 (9.8 + 2.) stop
+
     if (is_landing_finish) {
         ROS_INFO("Landing finish; try disarm...");
+        is_landing_tail = false;
+        is_touch_ground = true;
+
         this->try_arm(false);
         if (!state.is_armed) {
             request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
             ROS_INFO("Finsh landing, turn to IDLE");
-            is_landing_tail = false;
         }
         return;
     }
+
+    if (state.imu_data.linear_acceleration.z > 15.0) {
+        ROS_INFO("Detect touching ground, is_touch_ground to TRUE");
+        is_touch_ground = true;
+    }
+
     if (is_landing_tail) {
         ROS_INFO("Is landing tail....");
-        set_att_setpoint(0, 0, yaw_vo, landing_thrust, false, false);
+        if (is_touch_ground) {
+            ROS_INFO("Touch ground, thrust set zero");
+            //Actually thrust protection will only keep thrust at a low value but not 0. 0.0 is just for convenience
+            set_att_setpoint(0, 0, yaw_vo, 0.0, false, false);
+        }
+        else {
+            set_att_setpoint(0, 0, yaw_vo, landing_thrust, false, false);
+        }
         send_ctrl_cmd();
     } else {
         if (state.vo_valid && state.landing_mode == DCMD::LANDING_MODE_XYVEL) {
             if (state.pos.z > LANDING_ATT_MODE_HEIGHT) {
                 set_vel_setpoint(0, 0, state.landing_velocity);
             } else {
+                landing_thrust = state.bat_vol * BATTERY_THRUST_A + BATTERY_THRUST_B;
+                landing_thrust = float_constrain(landing_thrust, landing_thrust_min, landing_thrust_max);
+                ROS_INFO("battery is: %f", state.bat_vol);
+                ROS_INFO("raw thrust is: %f", state.bat_vol * BATTERY_THRUST_A + BATTERY_THRUST_B);
+                ROS_INFO("landing_thrust min is: %f", landing_thrust_min);
+                ROS_INFO("landing_thrust max is: %f", landing_thrust_max);
+                printf("landing_thrust is: %f", landing_thrust);
                 is_landing_tail = true;
                 //set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
 
@@ -1165,7 +1213,8 @@ void DroneCommander::request_ctrl_mode(uint32_t req_ctrl_mode) {
         }
 
         case DCMD::CTRL_MODE_TAKEOFF: {
-            if (state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR && state.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF) {
+            if (state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR && state.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF && state.commander_ctrl_mode != DCMD::CTRL_MODE_LANDING) {
+                ROS_INFO("Directly hover in take-off");
                 request_ctrl_mode(DCMD::CTRL_MODE_HOVER);       
             } else {
                 state.commander_ctrl_mode = req_ctrl_mode;

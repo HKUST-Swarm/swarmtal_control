@@ -10,7 +10,8 @@
         <remap from="/drone_commander/sdk_control_authority" to="/dji_sdk_1/dji_sdk/sdk_control_authority"/>
         <remap from="/drone_commander/fc_attitude" to="/dji_sdk_1/dji_sdk/attitude"/>
         <remap from="/drone_commander/battery" to="/dji_sdk_1/dji_sdk/battery_state"/>
+        <remap from="/drone_commander/fc_imu" to="/dji_sdk_1/dji_sdk/imu"/>
         <param name="rc_fail_detection" type="bool" value="false" />
-        <rosparam command="load" file="$(find drone_position_control)/launch/pos_control_param.yaml" />
+        <rosparam command="load" file="/home/dji/SwarmConfig/pos_control_param.yaml" />
     </node>
 </launch>
