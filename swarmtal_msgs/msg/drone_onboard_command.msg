@@ -10,7 +10,24 @@ uint32 CTRL_ARM_COMMAND=8
 
 uint32 CTRL_PLANING_TGT_COMMAND=10
 
+uint32 CTRL_FORMATION_IDLE=11
+
+#Passive hold in master's local frame
+uint32 CTRL_FORMATION_HOLD_0=12
+
+#Passive hold in master's natural frame
+uint32 CTRL_FORMATION_HOLD_1=13
+
+#Activate fly in master's local frame
+uint32 CTRL_FORMATION_FLY_0=14
+
+#Activate fly master's natural frame
+uint32 CTRL_FORMATION_FLY_1=15
+
 uint32 command_type
+#For formation param1 is submode
+#Param 2, 3, 4 is x y z
+#Param 5 is yaw
 
 # For POS param1 2 3 is x y z * 10000 
 # 4 is yaw*10000 if yaw =666666, then use last yawsp
