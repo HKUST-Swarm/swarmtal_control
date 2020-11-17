@@ -25,9 +25,10 @@ uint32 CTRL_FORMATION_FLY_0=14
 uint32 CTRL_FORMATION_FLY_1=15
 
 uint32 command_type
-#For formation param1 is submode
-#Param 2, 3, 4 is x y z
-#Param 5 is yaw
+#For formation param1 is id
+#Param 2 is submodule
+#3, 4, 5 is x y z
+#Param 6 is yaw
 
 # For POS param1 2 3 is x y z * 10000 
 # 4 is yaw*10000 if yaw =666666, then use last yawsp
