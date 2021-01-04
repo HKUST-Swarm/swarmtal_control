@@ -285,8 +285,17 @@ public:
         double roll_sp = 0;
         double yaw_sp = euler_rpy.z();
         
+        if (yaw_cmd.yaw_mode == YAW_MODE::YAW_MODE_LOCK) {
+            yaw_sp = yaw_cmd.yaw_sp;
+        }
+
+        if (yaw_cmd.yaw_mode == YAW_MODE::YAW_MODE_RATE) {
+            yaw_sp = yaw_cmd.yaw_sp * dt + yaw_sp;
+        }
+
         if (param.ctrl_frame == CTRL_FRAME::VEL_WORLD_ACC_WORLD) {
-            acc_sp = yaw_transverse.inverse() * acc_sp;
+            Eigen::Quaterniond _yaw_trans = Eigen::Quaterniond(Eigen::AngleAxisd(yaw_sp, Vector3d::UnitZ()));
+            acc_sp = _yaw_trans.inverse() * acc_sp;
         }
 
         if(param.coor_sys == FRAME_COOR_SYS::FLU) {
@@ -316,13 +325,6 @@ public:
             roll_sp = float_constrain(asin(acc_sp.y() /( acc_sp.norm() * cos(pitch_sp))), -MAX_TILT_ANGLE, MAX_TILT_ANGLE);
         }
 
-        if (yaw_cmd.yaw_mode == YAW_MODE::YAW_MODE_LOCK) {
-            yaw_sp = yaw_cmd.yaw_sp;
-        }
-
-        if (yaw_cmd.yaw_mode == YAW_MODE::YAW_MODE_RATE) {
-            yaw_sp = yaw_cmd.yaw_sp * dt + yaw_sp;
-        }
 
         // printf("accsp %3.2f %3.2f %3.2f\nsp p %3.2f r %3.2f y %3.2f\n",
             // acc_sp.x(), acc_sp.y(), acc_sp.z(),
