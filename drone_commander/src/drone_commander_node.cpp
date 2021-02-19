@@ -1355,7 +1355,7 @@ void DroneCommander::prepare_control_hover() {
             request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
         }
     } else {
-        last_hover_count = control_count - 1;
+        last_hover_count = control_count;
     }
 }
 
