@@ -58,7 +58,7 @@ using namespace Eigen;
 
 #define LOOP_DURATION 0.02
 
-// #define DEBUG_OUTPUT
+#define DEBUG_OUTPUT
 #define DEBUG_HOVER_CTRL
 
 #define MAGIC_YAW_NAN 666666
@@ -371,7 +371,7 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
         reset_yaw_sp();
     }
 
-    if (!(state.ctrl_input_state == DCMD::CTRL_INPUT_ONBOARD))
+    if (!(state.control_auth == DCMD::CTRL_AUTH_THIS))
         reset_ctrl_cmd();
     
     process_input_source();
@@ -942,9 +942,11 @@ void DroneCommander::process_rc_input () {
                     ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_POS_MODE;
                 } else {
                     ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_VEL_MODE;
+                    pos_sp_inited = false;
                 }
             } else {
                 ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
+                pos_sp_inited = false;
             }
 
 
@@ -1109,9 +1111,9 @@ void DroneCommander::process_control_takeoff() {
             is_takeoff_finish = true;
             ROS_INFO("Takeoff finish");
         } else {
-            ROS_INFO("Takeoff error %3.2f %3.2f %3.2f", fabs(pos.x - takeoff_origin.x()), 
-                fabs(pos.y - takeoff_origin.y()), 
-                fabs(pos.z - (takeoff_origin.z() + state.takeoff_target_height)) < MAX_AUTO_Z_ERROR);
+            // ROS_INFO("Takeoff error %3.2f %3.2f %3.2f", fabs(pos.x - takeoff_origin.x()), 
+                // fabs(pos.y - takeoff_origin.y()), 
+                // fabs(pos.z - (takeoff_origin.z() + state.takeoff_target_height)) < MAX_AUTO_Z_ERROR);
             is_takeoff_finish = false;
         }
     } else {
@@ -1187,9 +1189,9 @@ void DroneCommander::process_control_landing() {
     }
 
     if (is_landing_tail) {
-        ROS_INFO("Is landing tail....");
+        // ROS_INFO("Is landing tail....");
         if (is_touch_ground) {
-            ROS_INFO("Touch ground, thrust set zero");
+            ROS_INFO("Touch ground, thrust set to zero");
             //Actually thrust protection will only keep thrust at a low value but not 0. 0.0 is just for convenience
             set_att_setpoint(0, 0, yaw_vo, 0.0, false, false);
         }
@@ -1361,6 +1363,9 @@ void DroneCommander::prepare_control_hover() {
 
 
 void DroneCommander::reset_ctrl_cmd() {
+    pos_sp_inited = false;
+    last_hover_count = 0;
+    takeoff_inited = false;
     ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
     ctrl_cmd->pos_sp.x = 0;
     ctrl_cmd->pos_sp.y = 0;
