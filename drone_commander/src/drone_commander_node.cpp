@@ -161,6 +161,8 @@ class DroneCommander {
     double yaw_fc = 0;
     double yaw_vo = 0;
 
+    float MAX_VO_LATENCY;
+
     bool yaw_sp_inited = false;
 
     bool rc_fail_detection = true;
@@ -321,6 +323,8 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
         ROS_INFO("Flight Status loss time %3.2f, is invalid", (ros::Time::now() - last_flight_status_ts).toSec());        
         state.djisdk_valid = false;
     }
+
+    state.vo_latency = (ros::Time::now() - last_vo_image_ts).toSec();
 
     if (state.vo_valid && (ros::Time::now() - last_vo_image_ts).toSec() > MAX_VO_LATENCY) {
         state.vo_valid = false;
@@ -1275,7 +1279,9 @@ void DroneCommander::request_ctrl_mode(uint32_t req_ctrl_mode) {
             if (state.vo_valid) {
                 state.commander_ctrl_mode = req_ctrl_mode;
             } else {
-                state.commander_ctrl_mode = DCMD::CTRL_MODE_ATT;
+                ROS_WARN("VO failed on MISSION/HOVER/POSVEL Mode. Will emergency landing now");
+                state.commander_ctrl_mode = DCMD::CTRL_MODE_LANDING;
+                state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
                 return;
             }
             break;
@@ -1411,11 +1417,10 @@ bool DroneCommander::is_odom_valid(const nav_msgs::Odometry & _odom) {
         return false;
     }
 
-    /*
-    if ((ros::Time::now() - _odom.header.stamp).toSec() > MAX_VO_LATENCY ) {
-        ROS_WARN("Latency on odom!!!!!!!");
+    if ((ros::Time::now() - last_vo_image_ts).toSec() > MAX_VO_LATENCY ) {
+        ROS_WARN_THROTTLE(10.0, "Latency on odom %3.1fms! VO is not valid now.", (ros::Time::now() - last_vo_image_ts.toSec())*1000);
         return false;
-    }*/
+    }
 
     return true;
 }
