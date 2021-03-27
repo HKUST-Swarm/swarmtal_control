@@ -29,12 +29,12 @@
 using namespace swarmtal_msgs;
 using namespace Eigen;
 
-#define MAX_VO_LATENCY 0.2f
+// #define MAX_VO_LATENCY 0.5f
 #define MAX_LOSS_RC 0.1f
 #define MAX_LOSS_SDK 0.1f
 #define MAX_ODOM_VELOCITY 25.0f
 
-#define RC_DEADZONE_RPY 0.05
+#define RC_DEADZONE_RPY 0.1
 #define RC_DEADZONE_THRUST 0.2
 
 #define RC_MAX_TILT_VEL 3.0
@@ -121,7 +121,7 @@ class DroneCommander {
     ros::Subscriber ctrl_dev_sub;
     ros::Subscriber fc_att_sub;
     ros::Subscriber bat_sub;
-    ros::Subscriber imu_data_sub;
+    ros::Subscriber imu_data_sub, vo_sub_slow;
 
     ros::Timer loop_timer;
 
@@ -130,6 +130,7 @@ class DroneCommander {
     ros::Time last_vo_ts;
     ros::Time last_flight_status_ts;
     ros::Time last_try_arm_time;
+    ros::Time last_vo_image_ts;
 
     int fail_arm_times = 0;
 
@@ -211,6 +212,7 @@ public:
         nh.param<bool>("rc_fail_detection", rc_fail_detection, true);
         nh.param<double>("landing_thrust_min", landing_thrust_min, 0.0);
         nh.param<double>("landing_thrust_max", landing_thrust_max, 0.0);
+        nh.param<double>("max_vo_latency", MAX_VO_LATENCY, 0.4);
 
 
         if (rc_fail_detection) {
@@ -235,6 +237,7 @@ public:
     }
     void init_subscribes() {
         vo_sub = nh.subscribe("visual_odometry", 1, &DroneCommander::vo_callback, this, ros::TransportHints().tcpNoDelay());
+        vo_sub_slow = nh.subscribe("visual_odometry_image", 1, &DroneCommander::vo_callback_image, this, ros::TransportHints().tcpNoDelay());
         onboard_cmd_sub = nh.subscribe("onboard_command", 10, &DroneCommander::onboard_cmd_callback, this, ros::TransportHints().tcpNoDelay());
         flight_status_sub = nh.subscribe("flight_status", 1, &DroneCommander::flight_status_callback, this, ros::TransportHints().tcpNoDelay());
         rc_sub = nh.subscribe("rc", 1, &DroneCommander::rc_callback, this, ros::TransportHints().tcpNoDelay());
@@ -244,6 +247,8 @@ public:
         imu_data_sub = nh.subscribe("fc_imu", 1, &DroneCommander::on_imu_data, this, ros::TransportHints().tcpNoDelay());
     }
 
+
+    void vo_callback_image(const nav_msgs::Odometry & _odom);
     void vo_callback(const nav_msgs::Odometry & _odom);
     void rc_callback(const sensor_msgs::Joy & _rc);
     void flight_status_callback(const std_msgs::UInt8 & _flight_status);
@@ -302,6 +307,10 @@ public:
 };
 
 
+void DroneCommander::vo_callback_image(const nav_msgs::Odometry & _odom) {
+    last_vo_image_ts = _odom.header.stamp;
+}
+
 
 void DroneCommander::loop(const ros::TimerEvent & _e) {
     static int count = 0; 
@@ -311,9 +320,9 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
         state.djisdk_valid = false;
     }
 
-    if (state.vo_valid && (ros::Time::now() - last_vo_ts).toSec() > MAX_VO_LATENCY) {
+    if (state.vo_valid && (ros::Time::now() - last_vo_image_ts).toSec() > MAX_VO_LATENCY) {
         state.vo_valid = false;
-        ROS_INFO("VO loss time %3.2f, is invalid", (ros::Time::now() - last_vo_ts).toSec());
+        ROS_INFO("VO loss time %3.2f, is invalid", (ros::Time::now() - last_vo_image_ts).toSec());
     }
 
     if (state.rc_valid && (ros::Time::now() - last_rc_ts).toSec() > MAX_LOSS_RC ) {
