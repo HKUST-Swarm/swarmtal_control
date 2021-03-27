@@ -174,7 +174,7 @@ public:
 
         control_timer = nh.createTimer(ros::Duration(0.02), &DronePosControl::control_update, this);
         
-        log_path = "/home/dji/drone_log_lastest";
+        log_path = "/home/dji/drone_log_latest";
 
         init_log_file();
 
@@ -198,9 +198,9 @@ public:
         int r = rand();  
         char str[100] = {0};
 
-        sprintf(buffer, "/home/dji/log_%d.csv", r);
+        sprintf(buffer, "/home/dji/swarm_log_latest/control.csv", r);
 
-        FILE* flog_list = fopen("/home/dji/log_list.txt", "a");
+        FILE* flog_list = fopen("/home/dji/swarm_log_latest/log_list.txt", "a");
         if (flog_list != nullptr) {
             fprintf(flog_list,"%s\n", buffer);
             fflush(flog_list);
@@ -490,7 +490,7 @@ public:
             atti_out.thrust_sp = acc_sp.z() + pos_ctrl->thrust_ctrl.get_level_thrust();
             atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
 #endif
-            if (state.count % 50 == 0)
+            if (state.count % 5 == 0)
             {
                 ROS_INFO("Mode %d Possp/pos %3.2f %3.2f %3.2f/ %3.2f %3.2f %3.2f",
                     state.ctrl_mode,

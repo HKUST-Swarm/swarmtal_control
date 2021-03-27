@@ -16,7 +16,7 @@ def send(cmd, args, pub):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='A easy command tool for sending command to swarm drone')
     parser.add_argument('command_type', metavar='command_type', choices=
-        ["takeoff", "landing", "emland", "flyto", "arm", "disarm", "joy_control", "circle", "circle_yaw", "sweep", "csv"], help="Type of command to send")
+        ["takeoff", "landing", "emland", "flyto","vel", "arm", "disarm", "joy_control", "circle", "circle_yaw", "sweep", "csv"], help="Type of command to send")
     parser.add_argument("-c","--center", nargs=3, type=float, help="center for circle", default=[0, 0, 1])
     parser.add_argument("-r","--radius", type=float, help="radius for circle", default=0.5)
     parser.add_argument("-t","--cycle", type=float, help="cycle for circle or for sweep a cycle", default=30)
@@ -115,7 +115,32 @@ if __name__ == "__main__":
                 rate.sleep()
             except KeyboardInterrupt:
                 exit(0)
-                
+    
+    elif args.command_type == "vel":
+        cmd.command_type = drone_onboard_command.CTRL_VEL_COMMAND
+        if len(args.params) < 3:
+            rospy.logerr("Must give xyz when using flyto")
+            sys.exit(-1)
+        else:
+            cmd.param1 = int(args.params[0]*10000)
+            cmd.param2 = int(args.params[1]*10000)
+            cmd.param3 = int(args.params[2]*10000)
+
+            if len(args.params) == 4:
+                cmd.param4 = int(args.params[3]*10000)
+            else:
+                cmd.param4 = 666666
+            cmd.param5 = 0
+            cmd.param6 = 0
+            cmd.param7 = 0
+            cmd.param8 = 0
+        while not rospy.is_shutdown():
+            try:
+                send(cmd, args, pub)
+                rate.sleep()
+            except KeyboardInterrupt:
+                exit(0)
+
     elif args.command_type == "circle" or args.command_type == "circle_yaw":
         cmd.command_type = drone_onboard_command.CTRL_POS_COMMAND
         print("Will draw circle @ origin {} {} {}, r {} T {}".format(
