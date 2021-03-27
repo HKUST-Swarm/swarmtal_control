@@ -508,7 +508,7 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     if (state.vo_valid) {
         odometry = _odom;
         //FIX vo lost due to time align
-        last_vo_ts = ros::Time::now();
+        last_vo_ts = odometry.header.stamp;
     }
 
     state.pos.x = pose.position.x;
@@ -1418,7 +1418,10 @@ bool DroneCommander::is_odom_valid(const nav_msgs::Odometry & _odom) {
     }
 
     if ((ros::Time::now() - last_vo_image_ts).toSec() > MAX_VO_LATENCY ) {
-        ROS_WARN_THROTTLE(10.0, "Latency on odom %3.1fms! VO is not valid now.", (ros::Time::now() - last_vo_image_ts).toSec()*1000);
+        ROS_WARN_THROTTLE(1.0, "Latency on odom %3.1fms/%3.1fms! VO is not valid now.", 
+            (ros::Time::now() - last_vo_image_ts).toSec()*1000
+            (ros::Time::now() - last_vo_ts).toSec()*1000
+            );
         return false;
     }
 
