@@ -239,7 +239,7 @@ public:
     }
     void init_subscribes() {
         vo_sub = nh.subscribe("visual_odometry", 1, &DroneCommander::vo_callback, this, ros::TransportHints().tcpNoDelay());
-        vo_sub_slow = nh.subscribe("visual_odometry_image", 1, &DroneCommander::vo_callback_image, this, ros::TransportHints().tcpNoDelay());
+        vo_sub_slow = nh.subscribe("visual_odometry_image", 10, &DroneCommander::vo_callback_image, this, ros::TransportHints().tcpNoDelay());
         onboard_cmd_sub = nh.subscribe("onboard_command", 10, &DroneCommander::onboard_cmd_callback, this, ros::TransportHints().tcpNoDelay());
         flight_status_sub = nh.subscribe("flight_status", 1, &DroneCommander::flight_status_callback, this, ros::TransportHints().tcpNoDelay());
         rc_sub = nh.subscribe("rc", 1, &DroneCommander::rc_callback, this, ros::TransportHints().tcpNoDelay());
