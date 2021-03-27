@@ -564,6 +564,6 @@ int main(int argc, char** argv)
     DronePosControl pos_control(nh);
 
     ROS_INFO("Pos control node ready");
-    ros::spin();
-
+    ros::MultiThreadedSpinner spinner(4); // Use 4 threads
+    spinner.spin();
 }

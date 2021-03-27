@@ -1498,6 +1498,6 @@ int main(int argc, char** argv)
     DroneCommander swarm_commander(nh);
 
     ROS_INFO("Drone Commander is ONLINE! \n");
-    ros::spin();
-
+    ros::MultiThreadedSpinner spinner(4); // Use 4 threads
+    spinner.spin();
 }
