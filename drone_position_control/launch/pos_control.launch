@@ -2,7 +2,7 @@
     <arg name="vo_topic" default="/vins_estimator/imu_propagate"/>
     <arg name="output" default="screen" />
 
-    <node pkg="drone_position_control" name="drone_position_control" type="drone_position_control_node" output="$(arg output)">
+    <node pkg="drone_position_control" name="drone_position_control" type="drone_position_control_node" output="$(arg output)" launch-prefix="nice --20" >
         <rosparam command="load" file="/home/dji/SwarmConfig/pos_control_param.yaml" />
         <remap from="/drone_position_control/odometry" to="$(arg vo_topic)"/>
         <remap from="/drone_position_control/fc_attitude" to="/dji_sdk_1/dji_sdk/attitude"/>
