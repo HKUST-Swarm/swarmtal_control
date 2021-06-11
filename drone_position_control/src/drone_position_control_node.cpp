@@ -74,7 +74,7 @@ class DronePosControl {
         }
         fprintf(
                       //0 1 2  3  4  5  6  7   8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30
-            log_file, "%f,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
+            log_file, "%f,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f\n",
                 (ros::Time::now() - start_time).toSec(),//1
                 state.ctrl_mode,//2
                 state.pose.position.x,state.pose.position.y,state.pose.position.z,//5
@@ -88,6 +88,7 @@ class DronePosControl {
                 fc_att_rpy.x(), fc_att_rpy.y(), fc_att_rpy.z(),//27
                 angular_rate.x(), angular_rate.y(), angular_rate.z(), //30
                 state.imu_data.linear_acceleration.x, state.imu_data.linear_acceleration.y, state.imu_data.linear_acceleration.z //33
+                vel_ff.x(), vel_ff.y(), vel_ff.z()
             );
         fflush(log_file);
         
