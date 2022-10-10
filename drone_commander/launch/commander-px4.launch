@@ -1,0 +1,16 @@
+<launch>
+    <arg name="vo_topic" default="/vins_estimator/imu_propagate"/>
+    <arg name="output" default="screen" />
+
+    <node name="drone_commander" pkg="drone_commander" type="drone_commander_node" output="$(arg output)" launch-prefix="nice --20" >
+        <remap from="/drone_commander/visual_odometry" to="$(arg vo_topic)"/>
+        <remap from="/drone_commander/visual_odometry_image" to="/vins_estimator/odometry"/>
+        <remap from="/drone_commander/flight_status" to="/dji_sdk_1/dji_sdk/flight_status"/>
+        <remap from="/drone_commander/rc" to="/mavros/manual_control/control"/>
+        <remap from="/drone_commander/battery" to="/mavros/battery"/>
+        <remap from="/drone_commander/fc_imu" to="/mavros/imu/data_raw"/>
+        <remap from="/drone_commander/fc_imu_fused" to="/mavros/imu/data"/>
+        <param name="rc_fail_detection" type="bool" value="false" />
+        <rosparam command="load" file="/home/dji/SwarmConfig/pos_control_param.yaml" />
+    </node>
+</launch>

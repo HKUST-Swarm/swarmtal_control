@@ -87,7 +87,7 @@ class DronePosControl {
                 atti_out.thrust_sp,//24,
                 fc_att_rpy.x(), fc_att_rpy.y(), fc_att_rpy.z(),//27
                 angular_rate.x(), angular_rate.y(), angular_rate.z(), //30
-                state.imu_data.linear_acceleration.x, state.imu_data.linear_acceleration.y, state.imu_data.linear_acceleration.z //33
+                state.imu_data.linear_acceleration.x, state.imu_data.linear_acceleration.y, state.imu_data.linear_acceleration.z, //33
                 vel_ff.x(), vel_ff.y(), vel_ff.z()
             );
         fflush(log_file);
