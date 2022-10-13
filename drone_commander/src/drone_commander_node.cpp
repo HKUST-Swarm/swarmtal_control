@@ -411,6 +411,7 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
     }
 
     if (!state.djisdk_valid) {
+    	commander_state_pub.publish(state);
         return;
     }
     
