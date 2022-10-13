@@ -38,7 +38,7 @@ using namespace swarmtal_msgs;
 using namespace Eigen;
 
 // #define MAX_VO_LATENCY 0.5f
-#define MAX_LOSS_RC 0.1f
+#define MAX_LOSS_RC 0.3f
 #define MAX_LOSS_SDK 0.1f
 #define MAX_ODOM_VELOCITY 25.0f
 
@@ -914,12 +914,21 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
 
 
 bool DroneCommander::rc_request_onboard() {
+#if FCHardware == DJI_SDK
     return (rc.axes[4] > 8000 && rc.axes[5] < -8000);
+#else
+    return (rc.axes[4] > 1800 && rc.axes[5] > 1800);
+#endif
 }
 
 bool DroneCommander::rc_request_vo() {
-    // return (rc.axes[4] == 10000 && rc.axes[5] == -10000);
+#if FCHardware == DJI_SDK
+    //DJI is -10000 to 10000
     return (rc.axes[4] > 8000);
+#else
+    //PX4 is 1000 to 2000
+    return (rc.axes[4] > 1800);
+#endif
 }
 
 bool DroneCommander::rc_moving_stick () {
