@@ -29,6 +29,7 @@
 #include <mavros_msgs/PositionTarget.h>
 #include <mavros_msgs/AttitudeTarget.h>
 #include <mavros_msgs/RCIn.h>
+#include <mavros_msgs/CompanionProcessStatus.h>
 #endif
 
 #include <geometry_msgs/Vector3.h>
@@ -89,6 +90,18 @@ using namespace Eigen;
 #define BATTERY_THRUST_A -0.005555555555555558f 
 #define BATTERY_THRUST_B 0.18333333333333338f
 #define LANDING_VEL_Z_BATTERY_LOW -0.5
+
+enum class MAV_STATE {
+  MAV_STATE_UNINIT,
+  MAV_STATE_BOOT,
+  MAV_STATE_CALIBRATIN,
+  MAV_STATE_STANDBY,
+  MAV_STATE_ACTIVE,
+  MAV_STATE_CRITICAL,
+  MAV_STATE_EMERGENCY,
+  MAV_STATE_POWEROFF,
+  MAV_STATE_FLIGHT_TERMINATION,
+};
 
 inline double float_constrain(double v, double min, double max)
 {
@@ -155,7 +168,7 @@ class DroneCommander {
     ros::Time boot_time;
 
     ros::Publisher commander_state_pub;
-    ros::Publisher ctrl_cmd_pub, control_pos_vel_px4_pub, control_att_pub;
+    ros::Publisher ctrl_cmd_pub, control_pos_vel_px4_pub, control_att_pub, mavros_system_status_pub, mavros_odom_pub;
 
     drone_pos_ctrl_cmd * ctrl_cmd = nullptr;
 
@@ -327,6 +340,9 @@ protected:
 
     bool nead_control_by_this();
     void setupFCControl();
+
+    void sendPX4SystemActive();
+    void sendPX4SystemInactive();
 };
 
 
@@ -355,16 +371,14 @@ void DroneCommander::setupFCControl() {
     ROS_INFO("Services ready");
     drone_landing_control = nh.serviceClient<mavros_msgs::CommandTOL>("/mavros/cmd/land");
     control_pos_vel_px4_pub = nh.advertise<mavros_msgs::PositionTarget>("/mavros/setpoint_raw/local", 1);
+    mavros_system_status_pub =
+      nh.advertise<mavros_msgs::CompanionProcessStatus>("/mavros/companion_process/status", 1);
     control_att_pub = nh.advertise<mavros_msgs::AttitudeTarget>("/mavros/setpoint_raw/attitude", 1);
+    mavros_odom_pub = nh.advertise<nav_msgs::Odometry>("/mavros/odometry/out", 10);
     fc_state_sub = nh.subscribe("/mavros/state", 10, &DroneCommander::fc_state_callback, this, ros::TransportHints().tcpNoDelay());
     fc_extened_state_sub = nh.subscribe("/mavros/extended_state", 10, &DroneCommander::fc_extended_state_callback, this, ros::TransportHints().tcpNoDelay());
 #endif
 }
-
-void DroneCommander::vo_callback_image(const nav_msgs::Odometry & _odom) {
-    last_vo_image_ts = _odom.header.stamp;
-}
-
 
 void DroneCommander::loop(const ros::TimerEvent & _e) {
     static int count = 0; 
@@ -379,6 +393,9 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
     if (state.vo_valid && (ros::Time::now() - last_vo_image_ts).toSec() > MAX_VO_LATENCY) {
         state.vo_valid = false;
         ROS_INFO("VO loss time %3.2f, is invalid", (ros::Time::now() - last_vo_image_ts).toSec());
+#if FCHardware == PX4
+        sendPX4SystemInactive();
+#endif
     }
 
     if (state.rc_valid && (ros::Time::now() - last_rc_ts).toSec() > MAX_LOSS_RC ) {
@@ -581,6 +598,27 @@ bool DroneCommander::check_control_auth() {
 }
 
 
+void DroneCommander::vo_callback_image(const nav_msgs::Odometry & _odom) {
+    last_vo_image_ts = _odom.header.stamp;
+
+}
+
+void DroneCommander::sendPX4SystemActive() {
+    mavros_msgs::CompanionProcessStatus status_msg;
+    status_msg.header.stamp = ros::Time::now();
+    status_msg.component = 197;
+    status_msg.state = (int) MAV_STATE::MAV_STATE_ACTIVE;
+    mavros_system_status_pub.publish(status_msg);
+}
+
+void DroneCommander::sendPX4SystemInactive() {
+    mavros_msgs::CompanionProcessStatus status_msg;
+    status_msg.header.stamp = ros::Time::now();
+    status_msg.component = 197;
+    status_msg.state = (int) MAV_STATE::MAV_STATE_FLIGHT_TERMINATION;
+    mavros_system_status_pub.publish(status_msg);
+}
+
 void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     bool vo_valid = is_odom_valid(_odom);
     //printf("VO valid %d", vo_valid);
@@ -593,6 +631,9 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
         //Vo first time come
         //reset yaw sp use vo yaw
         reset_yaw_sp();
+#if FCHardware == PX4
+        sendPX4SystemActive();
+#endif
     }
     state.vo_valid = vo_valid;
     if (state.vo_valid) {
@@ -609,6 +650,22 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     state.vel.y = _odom.twist.twist.linear.y;
     state.vel.z = _odom.twist.twist.linear.z;
     state.yaw = yaw_vo;
+
+#if FCHardware == PX4
+    auto output = _odom;
+    output.header.frame_id = "odom";
+    output.child_frame_id = "base_link";
+    Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> pose_cov(output.pose.covariance.data());
+    Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> twist_cov(output.twist.covariance.data());
+    pose_cov.setZero();
+    twist_cov.setZero();
+    pose_cov.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * 0.01;
+    pose_cov.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * 0.001;
+    twist_cov = pose_cov;
+    //Send the output to Mavros.
+    mavros_odom_pub.publish(output);
+#endif
+
 }
 
 inline double lowpass_filter(double input, double fc, double outputlast, double dt) {
