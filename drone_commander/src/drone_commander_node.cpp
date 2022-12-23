@@ -164,6 +164,9 @@ class DroneCommander {
     ros::Time last_flight_status_ts;
     ros::Time last_try_arm_time;
     ros::Time last_vo_image_ts;
+    ros::Time last_send_odom_to_fc;
+
+    double send_odom_fc_freq = 20;
 
     int fail_arm_times = 0;
 
@@ -237,6 +240,7 @@ public:
         last_vo_ts = ros::Time::now();
         last_onboard_cmd_ts = ros::Time::now();
         last_try_arm_time = ros::Time::now();
+        last_send_odom_to_fc = ros::Time::now();
 
         setupFCControl();
         commander_state_pub = nh.advertise<drone_commander_state>("swarm_commander_state", 1);
@@ -660,18 +664,21 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     state.yaw = yaw_vo;
 
 #if FCHardware == PX4
-    auto output = _odom;
-    output.header.frame_id = "odom";
-    output.child_frame_id = "base_link";
-    Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> pose_cov(output.pose.covariance.data());
-    Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> twist_cov(output.twist.covariance.data());
-    pose_cov.setZero();
-    twist_cov.setZero();
-    pose_cov.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * 0.01;
-    pose_cov.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * 0.001;
-    twist_cov = pose_cov;
-    //Send the output to Mavros.
-    mavros_odom_pub.publish(output);
+        if ((ros::Time::now() - last_send_odom_to_fc).toSec() > 1/send_odom_fc_freq) {
+            last_send_odom_to_fc = ros::Time::now();
+            auto output = _odom;
+            output.header.frame_id = "odom";
+            output.child_frame_id = "base_link";
+            Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> pose_cov(output.pose.covariance.data());
+            Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> twist_cov(output.twist.covariance.data());
+            pose_cov.setZero();
+            twist_cov.setZero();
+            pose_cov.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * 0.01;
+            pose_cov.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * 0.001;
+            twist_cov = pose_cov;
+            //Send the output to Mavros.
+            mavros_odom_pub.publish(output);
+        }
 #endif
 
 }
