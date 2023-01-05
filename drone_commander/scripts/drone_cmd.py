@@ -62,6 +62,7 @@ if __name__ == "__main__":
             height = args.params[0]
         cmd.command_type = drone_onboard_command.CTRL_TAKEOF_COMMAND
         cmd.param1 = int(height*10000)
+        cmd.param2 = 5000 # 0.5m/s
         send(cmd, args, pub)
 
     elif args.command_type == "landing":

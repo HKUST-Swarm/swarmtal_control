@@ -1,5 +1,5 @@
 <launch>
-    <arg name="vo_topic" default="/d2vins/imu_propagate"/>
+    <arg name="vo_topic" default="/d2vins/imu_propagation"/>
     <arg name="output" default="screen" />
 
     <node name="drone_commander" pkg="drone_commander" type="drone_commander_node" output="$(arg output)" launch-prefix="nice --20" >
