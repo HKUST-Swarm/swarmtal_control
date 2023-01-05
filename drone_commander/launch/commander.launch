@@ -14,5 +14,6 @@
         <remap from="/drone_commander/fc_imu" to="/dji_sdk_1/dji_sdk/imu"/>
         <param name="rc_fail_detection" type="bool" value="false" />
         <rosparam command="load" file="/home/dji/SwarmConfig/pos_control_param.yaml" />
+
     </node>
 </launch>

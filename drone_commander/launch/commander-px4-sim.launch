@@ -1,8 +1,8 @@
 <launch>
-    <arg name="vo_topic" default="/d2vins/imu_propagation"/>
+    <arg name="vo_topic" default="/sim_odometry" />
     <arg name="output" default="screen" />
-    <arg name="config_path" default="/home/dji/SwarmConfig/pos_control_param.yaml" />
-    <node name="drone_commander" pkg="drone_commander" type="drone_commander_node" output="$(arg output)" launch-prefix="nice --20" >
+    <arg name="config_path" default="$(find drone_position_control)/launch/pos_control_param_sim.yaml" />
+    <node name="drone_commander" pkg="drone_commander" type="drone_commander_node" output="$(arg output)" >
         <remap from="/drone_commander/visual_odometry" to="$(arg vo_topic)"/>
         <remap from="/drone_commander/visual_odometry_image" to="/d2vins/odometry"/>
         <remap from="/drone_commander/flight_status" to="/dji_sdk_1/dji_sdk/flight_status"/>
@@ -10,11 +10,14 @@
         <remap from="/drone_commander/battery" to="/mavros/battery"/>
         <remap from="/drone_commander/fc_imu" to="/mavros/imu/data_raw"/>
         <remap from="/drone_commander/fc_imu_fused" to="/mavros/imu/data"/>
+        <param name="max_vo_latency" value="2672947864.0" />
         <param name="rc_fail_detection" type="bool" value="false" />
         <rosparam command="load" file="$(arg config_path)" />
     </node>
     <include file="$(find drone_position_control)/launch/pos_control-px4.launch">
         <arg name="vo_topic" value="$(arg vo_topic)"/>
         <arg name="config_path" value="$(arg config_path)"/>
+        <arg name="log_path" value="/home/xuhao/output/" />
     </include>
+    <node name="emulate_rc" pkg="drone_commander" type="emulate_rc.py" output="screen" />
 </launch>

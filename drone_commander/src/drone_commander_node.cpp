@@ -97,6 +97,7 @@ using namespace Eigen;
 
 #define EPS 0.01
 
+
 enum class MAV_STATE {
   MAV_STATE_UNINIT,
   MAV_STATE_BOOT,
@@ -218,16 +219,15 @@ class DroneCommander {
     bool pos_sp_inited = false;
     bool is_px4 = false;
 
-    bool ctrl_ruled_by_fc = false;
-
-
 #if FCHardware == PX4
     mavros_msgs::State px4_fcu_state;
 #endif
-
+    Eigen::Matrix3d R_ENU2NED;
+    Eigen::Matrix3d R_FLU2FRD; 
 public:
-    DroneCommander(ros::NodeHandle & _nh):
-        nh(_nh) {
+    DroneCommander(ros::NodeHandle & _nh): nh(_nh) {
+        R_ENU2NED << 0, 1, 0, 1, 0, 0, 0, 0, -1;
+        R_FLU2FRD << 1, 0, 0, 0, -1, 0, 0, 0, -1;
 #if FCHardware == PX4
         is_px4 = true;
 #endif
@@ -405,9 +405,6 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
     if (state.vo_valid && (ros::Time::now() - last_vo_image_ts).toSec() > MAX_VO_LATENCY) {
         state.vo_valid = false;
         ROS_INFO("VO loss time %3.2f, is invalid", (ros::Time::now() - last_vo_image_ts).toSec());
-#if FCHardware == PX4
-        sendPX4SystemInactive();
-#endif
     }
 
     if (state.rc_valid && (ros::Time::now() - last_rc_ts).toSec() > MAX_LOSS_RC ) {
@@ -433,7 +430,7 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
         //     rc.axes[4],
         //     rc.axes[5]
         // );
-        printf("POS %3.2f %3.2f %3.2f TGT %3.2f %3.2f %3.2f\nctrl_input_state %d, flight_status %d\nstate.control_auth %d  ctrl_mode %d, is_armed %d in air %d\n rc_valid %d onboard_cmd_valid %d vo_valid%d sdk_valid %d ctrl_ruled %d\n",
+        printf("POS %3.2f %3.2f %3.2f TGT %3.2f %3.2f %3.2f\nctrl_input_state %d, flight_status %d\nstate.control_auth %d  ctrl_mode %d, is_armed %d in air %d\n rc_valid %d onboard_cmd_valid %d vo_valid%d sdk_valid %d\n",
     	    odometry.pose.pose.position.x,
 	        odometry.pose.pose.position.y,
 	        odometry.pose.pose.position.z,
@@ -449,9 +446,7 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
             state.rc_valid,
             state.onboard_cmd_valid,
             state.vo_valid,
-            state.djisdk_valid,
-            ctrl_ruled_by_fc
-        );
+            state.djisdk_valid);
     }
 
     if (!state.djisdk_valid) {
@@ -463,10 +458,8 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
         reset_yaw_sp();
     }
 
-#if FCHardware == DJI_SDK
     if (!(state.control_auth == DCMD::CTRL_AUTH_THIS))
         reset_ctrl_cmd();
-#endif
     
     process_input_source();
 
@@ -595,11 +588,7 @@ bool DroneCommander::check_control_auth() {
         try_control_auth(require_auth_this);
     }
 
-#if FCHardware == DJI_SDK
     return state.control_auth == DCMD::CTRL_AUTH_THIS;
-#else
-    return true;
-#endif
 }
 
 
@@ -636,9 +625,6 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
         //Vo first time come
         //reset yaw sp use vo yaw
         reset_yaw_sp();
-#if FCHardware == PX4
-        sendPX4SystemActive();
-#endif
     }
     state.vo_valid = vo_valid;
     if (state.vo_valid) {
@@ -655,25 +641,6 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     state.vel.y = _odom.twist.twist.linear.y;
     state.vel.z = _odom.twist.twist.linear.z;
     state.yaw = yaw_vo;
-
-#if FCHardware == PX4
-        if ((ros::Time::now() - last_send_odom_to_fc).toSec() > 1/send_odom_fc_freq) {
-            last_send_odom_to_fc = ros::Time::now();
-            auto output = _odom;
-            output.header.frame_id = "odom";
-            output.child_frame_id = "base_link";
-            Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> pose_cov(output.pose.covariance.data());
-            Eigen::Map<Eigen::Matrix<double, 6, 6, Eigen::RowMajor>> twist_cov(output.twist.covariance.data());
-            pose_cov.setZero();
-            twist_cov.setZero();
-            pose_cov.block<3, 3>(0, 0) = Eigen::Matrix3d::Identity() * 0.01;
-            pose_cov.block<3, 3>(3, 3) = Eigen::Matrix3d::Identity() * 0.001;
-            twist_cov = pose_cov;
-            //Send the output to Mavros.
-            mavros_odom_pub.publish(output);
-        }
-#endif
-
 }
 
 inline double lowpass_filter(double input, double fc, double outputlast, double dt) {
@@ -742,7 +709,6 @@ void DroneCommander::fc_state_callback(const mavros_msgs::State & _state) {
     state.djisdk_valid = true;
     if (px4_fcu_state.mode == mavros_msgs::State::MODE_PX4_OFFBOARD) {
         state.control_auth = DCMD::CTRL_AUTH_THIS;
-        ctrl_ruled_by_fc = false;
     } else {
         state.control_auth = DCMD::CTRL_AUTH_RC;
     }
@@ -751,30 +717,6 @@ void DroneCommander::fc_state_callback(const mavros_msgs::State & _state) {
     }
     if (state.is_armed && state.flight_status == DCMD::FLIGHT_STATUS_IDLE) {
         state.flight_status = DCMD::FLIGHT_STATUS_ARMED;
-    }
-    if (state.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF) {
-        if (px4_fcu_state.mode == mavros_msgs::State::MODE_PX4_STABILIZED) {
-            state.commander_ctrl_mode = DCMD::CTRL_MODE_ATT;
-            ctrl_ruled_by_fc = true;
-            // printf("[COMMANDER] set ctrl_ruled MODE_ATT\n");
-        } else if (px4_fcu_state.mode == mavros_msgs::State::MODE_PX4_ALTITUDE) {
-            state.commander_ctrl_mode = DCMD::CTRL_MODE_ALT; //Attitude and z vel
-            ctrl_ruled_by_fc = true;
-            // printf("[COMMANDER] set ctrl_ruled MODE_ALT\n");
-        } else if (px4_fcu_state.mode == mavros_msgs::State::MODE_PX4_POSITION) {
-            state.commander_ctrl_mode = DCMD::CTRL_MODE_POSVEL; //Attitude and z vel
-            // printf("[COMMANDER] set ctrl_ruled MODE_POSVEL\n");
-            ctrl_ruled_by_fc = true;
-        } else if (px4_fcu_state.mode == mavros_msgs::State::MODE_PX4_LAND) {
-            state.commander_ctrl_mode = DCMD::CTRL_MODE_LANDING; //Attitude and z vel
-            ctrl_ruled_by_fc = true;
-        } else if (px4_fcu_state.mode == mavros_msgs::State::MODE_PX4_TAKEOFF) {
-            state.commander_ctrl_mode = DCMD::CTRL_MODE_TAKEOFF; //Attitude and z vel
-            ctrl_ruled_by_fc = true;
-        } else if (px4_fcu_state.mode == mavros_msgs::State::MODE_PX4_MISSION) {
-            state.commander_ctrl_mode = DCMD::CTRL_MODE_MISSION; //Attitude and z vel
-            ctrl_ruled_by_fc = true;
-        }
     }
     last_flight_status_ts = ros::Time::now();
 }
@@ -816,10 +758,6 @@ void DroneCommander::fc_attitude_callback(const geometry_msgs::QuaternionStamped
     geometry_msgs::Quaternion quat = _quat.quaternion;
 
 
-    Eigen::Matrix3d R_FLU2FRD; 
-    R_FLU2FRD << 1, 0, 0, 0, -1, 0, 0, 0, -1;
-    Eigen::Matrix3d R_ENU2NED;
-    R_ENU2NED << 0, 1, 0, 1, 0, 0, 0, 0, -1;
 
     Eigen::Quaterniond q(quat.w, quat.x, quat.y, quat.z);
 
@@ -849,10 +787,6 @@ void DroneCommander::on_imu_data(const sensor_msgs::Imu & _imu) {
 
 void DroneCommander::on_imu_data_fused(const sensor_msgs::Imu & _imu) {
     geometry_msgs::Quaternion quat = _imu.orientation;
-    Eigen::Matrix3d R_FLU2FRD; 
-    R_FLU2FRD << 1, 0, 0, 0, -1, 0, 0, 0, -1;
-    Eigen::Matrix3d R_ENU2NED;
-    R_ENU2NED << 0, 1, 0, 1, 0, 0, 0, 0, -1;
     Eigen::Quaterniond q(quat.w, quat.x, quat.y, quat.z);
     Eigen::Matrix3d RFLU2ENU = q.toRotationMatrix();
     q = Eigen::Quaterniond(R_ENU2NED*RFLU2ENU*R_FLU2FRD.transpose());
@@ -1153,19 +1087,17 @@ void DroneCommander::process_rc_input () {
     }
     
     //Force RC control velocity
-    if (!ctrl_ruled_by_fc) {
-        if (rc_moving_stick()) {
-            request_ctrl_mode(DCMD::CTRL_MODE_POSVEL);
+    if (rc_moving_stick()) {
+        request_ctrl_mode(DCMD::CTRL_MODE_POSVEL);
+    } else {
+        if (state.commander_ctrl_mode != DCMD::CTRL_MODE_MISSION && 
+            state.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF &&
+            state.commander_ctrl_mode != DCMD::CTRL_MODE_LANDING) {
+            // ROS_INFO("Stick not moving, using hOver mode");
+            //When no input and not takeoff and not landing, turn to hover
+            request_ctrl_mode(DCMD::CTRL_MODE_HOVER);
         } else {
-            if (state.commander_ctrl_mode != DCMD::CTRL_MODE_MISSION && 
-                state.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF &&
-                state.commander_ctrl_mode != DCMD::CTRL_MODE_LANDING) {
-                // ROS_INFO("Stick not moving, using hOver mode");
-                //When no input and not takeoff and not landing, turn to hover
-                request_ctrl_mode(DCMD::CTRL_MODE_HOVER);
-            } else {
-                // ROS_INFO("Waiting for");
-            }
+            // ROS_INFO("Waiting for");
         }
     }
 
@@ -1200,7 +1132,7 @@ void DroneCommander::process_rc_input () {
             ctrl_cmd->vel_sp.y = -vxd * sin(yaw_vo) + vyd*cos(yaw_vo);
             ctrl_cmd->vel_sp.z = z * RC_MAX_Z_VEL;
 
-            if (!pos_sp_inited || ctrl_ruled_by_fc) {
+            if (!pos_sp_inited) {
                 ctrl_cmd->pos_sp.x = odometry.pose.pose.position.x;
                 ctrl_cmd->pos_sp.y = odometry.pose.pose.position.y;
                 ctrl_cmd->pos_sp.z = odometry.pose.pose.position.z;
@@ -1208,7 +1140,7 @@ void DroneCommander::process_rc_input () {
                 reset_yaw_sp();
             }
 
-            if (state.is_armed && state.control_auth == DCMD::CTRL_AUTH_THIS || ctrl_ruled_by_fc) { 
+            if (state.is_armed && state.control_auth == DCMD::CTRL_AUTH_THIS) { 
                 if(state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) {
                     ctrl_cmd->pos_sp.x = ctrl_cmd->pos_sp.x + ctrl_cmd->vel_sp.x * LOOP_DURATION;
                     ctrl_cmd->pos_sp.y = ctrl_cmd->pos_sp.y + ctrl_cmd->vel_sp.y * LOOP_DURATION;
@@ -1281,10 +1213,12 @@ void DroneCommander::process_onboard_input () {
 void DroneCommander::process_control() {
     //control_count ++;
     if (state.control_auth != DCMD::CTRL_AUTH_THIS) {
-#if FCHardware == DJI_SDK
-        state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+        if (state.commander_ctrl_mode == DCMD::CTRL_MODE_TAKEOFF && FCHardware == PX4) {
+            process_control_takeoff();
+        } else {
+            state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+        }
         return;
-#endif
     }
 
     switch (state.commander_ctrl_mode) {
@@ -1346,9 +1280,6 @@ void DroneCommander::process_control_takeoff() {
     bool is_takeoff_finish = false;
     auto pos = odometry.pose.pose.position;
 #if FCHardware == DJI_SDK
-    if (ctrl_ruled_by_fc) {
-        return;
-    }
     if (state.control_auth != DCMD::CTRL_AUTH_THIS) {
         //Abort takeoff
         takeoff_inited = false;
@@ -1356,7 +1287,6 @@ void DroneCommander::process_control_takeoff() {
         return;
     }
 #endif
-    // printf("Processing takeoff is_in_air: %d\n", is_in_air);
     if (!state.vo_valid) {
         takeoff_inited = false;
         request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
@@ -1391,9 +1321,6 @@ void DroneCommander::process_control_takeoff() {
             is_takeoff_finish = true;
             ROS_INFO("Takeoff finish");
         } else {
-            // ROS_INFO("Takeoff error %3.2f %3.2f %3.2f", fabs(pos.x - takeoff_origin.x()), 
-                // fabs(pos.y - takeoff_origin.y()), 
-                // fabs(pos.z - (takeoff_origin.z() + state.takeoff_target_height)) < MAX_AUTO_Z_ERROR);
             is_takeoff_finish = false;
         }
     } else {
@@ -1415,7 +1342,6 @@ void DroneCommander::process_control_takeoff() {
         return;
     }
     if (state.vo_valid) {
-#if FCHardware == DJI_SDK
         if (is_in_air) {
             //Already in air, process as a  posvel control
             ctrl_cmd->max_vel.z = state.takeoff_velocity;
@@ -1423,9 +1349,6 @@ void DroneCommander::process_control_takeoff() {
         } else {
             set_att_setpoint(0, 0, yaw_vo, state.takeoff_velocity, true, false);    
         }
-#else
-        set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
-#endif
     }
 
     send_ctrl_cmd();
@@ -1461,9 +1384,6 @@ bool DroneCommander::request_drone_landing() {
 }
 
 void DroneCommander::process_control_landing() {
-    if (ctrl_ruled_by_fc) {
-        return;
-    }
     bool is_landing_finish = state.flight_status < DCMD::FLIGHT_STATUS_IN_AIR;
 
     // if acc.z > 12 (9.8 + 2.) stop
@@ -1500,8 +1420,8 @@ void DroneCommander::process_control_landing() {
     } else {
         if (state.vo_valid && state.landing_mode == DCMD::LANDING_MODE_XYVEL) {
             if (state.pos.z > LANDING_ATT_MODE_HEIGHT) {
-                // set_vel_setpoint(0, 0, state.landing_velocity);
-                set_pos_setpoint(state.pos.x, state.pos.y, state.pos.z, NAN, 0.0, 0.0, state.landing_velocity);
+                set_vel_setpoint(0, 0, state.landing_velocity);
+                // set_pos_setpoint(state.pos.x, state.pos.y, state.pos.z, NAN, 0.0, 0.0, state.landing_velocity);
             } else {
                 landing_thrust = state.bat_vol * BATTERY_THRUST_A + BATTERY_THRUST_B;
                 landing_thrust = float_constrain(landing_thrust, landing_thrust_min, landing_thrust_max);
@@ -1511,7 +1431,6 @@ void DroneCommander::process_control_landing() {
                 ROS_INFO("landing_thrust max is: %f", landing_thrust_max);
                 printf("landing_thrust is: %f", landing_thrust);
                 is_landing_tail = true;
-                //set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
                 set_att_setpoint(0, 0, yaw_vo, state.landing_velocity, true, false);
                 /*
                 bool res = request_drone_landing();
@@ -1557,7 +1476,7 @@ void DroneCommander::request_ctrl_mode(uint32_t req_ctrl_mode) {
         case DCMD::CTRL_MODE_MISSION:
         case DCMD::CTRL_MODE_HOVER:
         case DCMD::CTRL_MODE_POSVEL:{
-            if (state.flight_status < state.FLIGHT_STATUS_IN_AIR && !ctrl_ruled_by_fc) {
+            if (state.flight_status < state.FLIGHT_STATUS_IN_AIR) {
                 //Not in air; goto IDLE
                 state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
             } else {
@@ -1579,7 +1498,7 @@ void DroneCommander::request_ctrl_mode(uint32_t req_ctrl_mode) {
         default:
         case DCMD::CTRL_MODE_ALT:
         case DCMD::CTRL_MODE_ATT: {
-            if (state.flight_status < state.FLIGHT_STATUS_IN_AIR && !ctrl_ruled_by_fc) {
+            if (state.flight_status < state.FLIGHT_STATUS_IN_AIR) {
                 //Not in air; goto IDLE
                 state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
             } else {
@@ -1603,10 +1522,6 @@ void DroneCommander::request_ctrl_mode(uint32_t req_ctrl_mode) {
 }
 
 void DroneCommander::process_control_mode() {
-    if (ctrl_ruled_by_fc) {
-        return;
-    }
-    //Request self ctrl mode can check vo vaild
     request_ctrl_mode(state.commander_ctrl_mode);
 
 }
@@ -1687,14 +1602,10 @@ void DroneCommander::send_ctrl_cmd() {
     if (ctrl_cmd->ctrl_mode != DPCL::CTRL_CMD_POS_MODE) {
         pos_sp_inited = false;
     }
-#if FCHardware == DJI_SDK
-    if (!ctrl_ruled_by_fc && (!state.is_armed || state.control_auth != DCMD::CTRL_AUTH_THIS)) {
+    if (!state.is_armed || state.control_auth != DCMD::CTRL_AUTH_THIS) {
         ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
     }
     ctrl_cmd_pub.publish(*ctrl_cmd);
-#else
-    send_control_cmd_px4();
-#endif
 }
 
 
@@ -1708,8 +1619,7 @@ void DroneCommander::set_hover_target_position(double x, double y, double z) {
 
 void DroneCommander::prepare_control_hover() {
     bool fail_to_hover = false;
-    if (last_hover_count < control_count - 1 && state.is_armed && state.vo_valid 
-            || ctrl_ruled_by_fc) {
+    if (last_hover_count < control_count - 1 && state.is_armed && state.vo_valid) {
         //Need to start new hover
         if (fabs(odometry.twist.twist.linear.x) > DANGER_SPEED_HOVER ||
             fabs(odometry.twist.twist.linear.y) > DANGER_SPEED_HOVER ||
@@ -1746,25 +1656,21 @@ void DroneCommander::reset_ctrl_cmd() {
     pos_sp_inited = false;
     last_hover_count = 0;
     takeoff_inited = false;
-    if (ctrl_ruled_by_fc) {
-        //process ctrl rulede by fc
-    } else {
-        ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
-        ctrl_cmd->pos_sp.x = 0;
-        ctrl_cmd->pos_sp.y = 0;
-        ctrl_cmd->pos_sp.z = 0;
+    ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
+    ctrl_cmd->pos_sp.x = 0;
+    ctrl_cmd->pos_sp.y = 0;
+    ctrl_cmd->pos_sp.z = 0;
 
-        ctrl_cmd->vel_sp.x = 0;
-        ctrl_cmd->vel_sp.y = 0;
-        ctrl_cmd->vel_sp.z = 0;
+    ctrl_cmd->vel_sp.x = 0;
+    ctrl_cmd->vel_sp.y = 0;
+    ctrl_cmd->vel_sp.z = 0;
 
-        ctrl_cmd->att_sp.w = 0;
-        ctrl_cmd->att_sp.x = 0;
-        ctrl_cmd->att_sp.y = 0;
-        ctrl_cmd->att_sp.z = 0;
-        
-        ctrl_cmd->z_sp = 0;
-    }
+    ctrl_cmd->att_sp.w = 0;
+    ctrl_cmd->att_sp.x = 0;
+    ctrl_cmd->att_sp.y = 0;
+    ctrl_cmd->att_sp.z = 0;
+    
+    ctrl_cmd->z_sp = 0;
 
     reset_ctrl_cmd_max_vel();
     

@@ -14,6 +14,9 @@
 #include <sensor_msgs/Joy.h>
 #include <drone_position_control/swarm_util.h>
 #include <sensor_msgs/Imu.h>
+#include <swarmtal_msgs/drone_onboard_command.h>
+#include <swarmtal_msgs/drone_commander_state.h>
+#include <mavros_msgs/PositionTarget.h>
 
 using namespace swarmtal_msgs;
 #define MAX_CMD_LOST_TIME 0.5f
@@ -21,10 +24,19 @@ using namespace swarmtal_msgs;
 #define ANGULARRATE_MIX 0.9
 #define MAX_ACC 8 // max accerelation
 
+#define PX4 0 
+#define DJI_SDK 1
+// #define FCHardware DJI_SDK
+#define FCHardware PX4
+
+#if FCHardware == PX4
+#include <mavros_msgs/AttitudeTarget.h>
+#endif
+
 class DronePosControl {
     ros::NodeHandle & nh;
     
-    ros::Subscriber odom_sub;
+    ros::Subscriber odom_sub, commander_state_sub;
     ros::Subscriber drone_pos_cmd_sub;
     ros::Subscriber fc_att_sub;
     ros::Subscriber imu_data_sub;
@@ -32,6 +44,7 @@ class DronePosControl {
     RotorPositionControl * pos_ctrl = nullptr;
 
     swarmtal_msgs::drone_pos_control_state state;
+    swarmtal_msgs::drone_commander_state commander_state;
 
     Eigen::Vector3d pos_sp = Eigen::Vector3d(0, 0, 0);
     Eigen::Vector3d vel_sp = Eigen::Vector3d(0, 0, 0);
@@ -52,7 +65,7 @@ class DronePosControl {
 
 
     ros::Publisher state_pub;
-    ros::Publisher control_pub;
+    ros::Publisher control_pub, control_pos_vel_px4_pub;
 
     std::string log_path;
 
@@ -153,14 +166,13 @@ class DronePosControl {
         nh.param<double>("odom_gc_pos/z", odom_gc_pos.z(), 0);
     }
     ros::Timer control_timer;
-    Eigen::Matrix3d R_FLU2FRD; 
     Eigen::Matrix3d R_ENU2NED;
-
+    Eigen::Matrix3d R_FLU2FRD; 
 public:
     DronePosControl(ros::NodeHandle & _nh):
     nh(_nh) {
-        R_FLU2FRD << 1, 0, 0, 0, -1, 0, 0, 0, -1;
         R_ENU2NED << 0, 1, 0, 1, 0, 0, 0, 0, -1;
+        R_FLU2FRD << 1, 0, 0, 0, -1, 0, 0, 0, -1;
 
         RotorPosCtrlParam ctrlP;
 
@@ -175,7 +187,7 @@ public:
 
         control_timer = nh.createTimer(ros::Duration(0.02), &DronePosControl::control_update, this);
         
-        log_path = "/home/dji/drone_log_latest";
+        nh.param<std::string>("log_path", log_path, "/home/dji/drone_log_latest");
 
         init_log_file();
 
@@ -185,8 +197,14 @@ public:
         drone_pos_cmd_sub = nh.subscribe("drone_pos_cmd", 1 , &DronePosControl::OnSwarmPosCommand, this, ros::TransportHints().tcpNoDelay());
         fc_att_sub = nh.subscribe("fc_attitude", 1, &DronePosControl::onFCAttitude, this, ros::TransportHints().tcpNoDelay());
         imu_data_sub = nh.subscribe("fc_imu", 1, &DronePosControl::on_imu_data, this, ros::TransportHints().tcpNoDelay());
-        control_pub = nh.advertise<sensor_msgs::Joy>("dji_sdk_control", 1);
+        commander_state_sub = nh.subscribe("/drone_commander/swarm_commander_state", 1, &DronePosControl::on_commander_state, this, ros::TransportHints().tcpNoDelay());
 
+#if FCHardware == DJI_SDK
+        control_pub = nh.advertise<sensor_msgs::Joy>("dji_sdk_control", 1);
+#else
+        control_pub = nh.advertise<mavros_msgs::AttitudeTarget>("/mavros/setpoint_raw/attitude", 1);
+        control_pos_vel_px4_pub = nh.advertise<mavros_msgs::PositionTarget>("/mavros/setpoint_raw/local", 1);
+#endif
         start_time = last_cmd_ts = ros::Time::now();
     }   
 
@@ -221,9 +239,6 @@ public:
     }
 
     void on_imu_data(const sensor_msgs::Imu & _imu) {
-
-
-
         state.imu_data = _imu;
         Eigen::Vector3d acc(
             state.imu_data.linear_acceleration.x,
@@ -236,32 +251,49 @@ public:
         angular_rate.y() = _imu.angular_velocity.y;// * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.y();
         angular_rate.z() = _imu.angular_velocity.z;// * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.z();
         pos_ctrl->set_body_acc(acc);
-
+#if FCHardware == DJI_SDK
         geometry_msgs::Quaternion quat = _imu.orientation;
-
-
         Eigen::Quaterniond q(quat.w, quat.x, quat.y, quat.z);
-
         Eigen::Matrix3d RFLU2ENU = q.toRotationMatrix();
-
         q = Eigen::Quaterniond(R_ENU2NED*RFLU2ENU*R_FLU2FRD.transpose());
-
         Eigen::Vector3d rpy = quat2eulers(q);
+        //Original rpy is ENU, we need NED rpy
+        fc_att_rpy = rpy;
+        yaw_fc = constrainAngle(rpy.z());
+#endif
+    }
 
+#if FCHardware == DJI_SDK
+    void onFCAttitude(const geometry_msgs::QuaternionStamped & _quat) {
+        // geometry_msgs::Quaternion quat = _quat.quaternion;
+        // Eigen::Quaterniond q(quat.w, 
+            // quat.x, quat.y, quat.z);
+        // Eigen::Vector3d rpy = quat2eulers(q);
+
+        //Original rpy is FLU, we need NED rpy
+        // fc_att_rpy = rpy;
+        // yaw_fc = constrainAngle(-rpy.z() + M_PI/2);
+
+        // ROS_INFO("Yaw FC is %3.2f %3.2f", rpy.z(), yaw_fc);
+    }
+#else
+    void onFCAttitude(const sensor_msgs::Imu & _imu) {
+        geometry_msgs::Quaternion quat = _imu.orientation;
+        Eigen::Quaterniond q(quat.w, quat.x, quat.y, quat.z);
+        Eigen::Matrix3d RFLU2ENU = q.toRotationMatrix();
+        q = Eigen::Quaterniond(R_ENU2NED*RFLU2ENU*R_FLU2FRD.transpose());
+        Eigen::Vector3d rpy = quat2eulers(q);
         //Original rpy is ENU, we need NED rpy
         fc_att_rpy = rpy;
         yaw_fc = constrainAngle(rpy.z());
 
-        /*
-        ROS_INFO_THROTTLE(1.0, "FC Attitude roll %3.2f pitch %3.2f yaw %3.2f",
-            rpy.x()*57.3,
-            rpy.y()*57.3,
-            rpy.z()*57.3
-        );
-        */
-        // pos_ctrl->set_attitude(q);
-
+        // Eigen::Vector3d rpy_raw = quat2eulers(Eigen::Quaterniond(quat.w, quat.x, quat.y, quat.z));
+        // printf("Atti sp yaw %3.2f deg pitch %3.2f deg roll %3.2f deg yaw_offset %3.2f\n", atti_out.yaw_sp*180/M_PI, atti_out.pitch_sp*180/M_PI, atti_out.roll_sp*180/M_PI, 
+        //         yaw_offset*180/M_PI);
+        // printf("NED Yaw %3.2f deg pitch %3.2f deg roll %3.2f deg\n", rpy.z()*180/M_PI, rpy.y()*180/M_PI, rpy.x()*180/M_PI);
+        // printf("Raw Yaw %3.2f deg pitch %3.2f deg roll %3.2f deg\n", rpy_raw.z()*180/M_PI, rpy_raw.y()*180/M_PI, rpy_raw.x()*180/M_PI);
     }
+#endif
 
     void set_drone_global_pos_vel_att(Eigen::Vector3d pos, Eigen::Vector3d vel, Eigen::Quaterniond quat) {
         pos_ctrl->set_pos(pos);
@@ -276,6 +308,10 @@ public:
         state.global_vel.z = vel.z();
 
         pos_ctrl->set_attitude(quat);
+    }
+
+    void on_commander_state(const swarmtal_msgs::drone_commander_state & _cmd_state) {
+        commander_state = _cmd_state;
     }
 
     void OnSwarmPosCommand(const swarmtal_msgs::drone_pos_ctrl_cmd & _cmd) {
@@ -336,18 +372,6 @@ public:
         return Eigen::Quaterniond(Eigen::AngleAxisd(yaw_offset, Vector3d::UnitZ()));
     }
 
-    void onFCAttitude(const geometry_msgs::QuaternionStamped & _quat) {
-        // geometry_msgs::Quaternion quat = _quat.quaternion;
-        // Eigen::Quaterniond q(quat.w, 
-            // quat.x, quat.y, quat.z);
-        // Eigen::Vector3d rpy = quat2eulers(q);
-
-        //Original rpy is FLU, we need NED rpy
-        // fc_att_rpy = rpy;
-        // yaw_fc = constrainAngle(-rpy.z() + M_PI/2);
-
-        // ROS_INFO("Yaw FC is %3.2f %3.2f", rpy.z(), yaw_fc);
-    }
 
     void OnVisualOdometry(const nav_msgs::Odometry & odom) {
         static Eigen::Vector3d ang_vel_last = Eigen::Vector3d(0, 0, 0);
@@ -390,6 +414,7 @@ public:
 
 
     void set_drone_attitude_target(AttiCtrlOut atti_out) {
+#if FCHardware == DJI_SDK
         //Use dji ros to set drone attitude target
         sensor_msgs::Joy dji_command_so3; //! @note for dji ros wrapper
         dji_command_so3.header.stamp    = ros::Time::now();
@@ -438,6 +463,91 @@ public:
         dji_command_so3.axes.push_back(flag);
 
         control_pub.publish(dji_command_so3);
+#else
+        if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_THRUST) {
+            mavros_msgs::AttitudeTarget att_target;
+            att_target.header.stamp = ros::Time::now();
+            att_target.header.frame_id = "world";
+            att_target.type_mask = mavros_msgs::AttitudeTarget::IGNORE_ROLL_RATE |
+                                    mavros_msgs::AttitudeTarget::IGNORE_PITCH_RATE |
+                                    mavros_msgs::AttitudeTarget::IGNORE_YAW_RATE;
+            auto atti_sp = atti_out.atti_sp;
+            if (!state.use_fc_yaw) {
+                //Rotated 
+                atti_sp = Eigen::AngleAxisd(yaw_offset, Vector3d::UnitZ())*atti_sp;
+            }
+            atti_sp = R_ENU2NED.transpose()*atti_sp*R_FLU2FRD;
+            att_target.orientation.w = atti_sp.w();
+            att_target.orientation.x = atti_sp.x();
+            att_target.orientation.y = atti_sp.y();
+            att_target.orientation.z = atti_sp.z();
+            att_target.thrust = atti_out.thrust_sp;
+            control_pub.publish(att_target);
+        } else if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_VELZ) {
+            //Dummy input only
+            mavros_msgs::PositionTarget pos_target;
+            pos_target.header.stamp = ros::Time::now();
+            pos_target.header.frame_id = "world";
+            pos_target.coordinate_frame = mavros_msgs::PositionTarget::FRAME_LOCAL_NED; //Note we send FLU
+            Vector3d acc_sp(0., 0., 9.8);
+            pos_target.type_mask = mavros_msgs::PositionTarget::IGNORE_PX |
+                    mavros_msgs::PositionTarget::IGNORE_PY |
+                    mavros_msgs::PositionTarget::IGNORE_PZ;
+            pos_target.type_mask |= mavros_msgs::PositionTarget::IGNORE_VX |
+                mavros_msgs::PositionTarget::IGNORE_VY;
+            auto atti_sp = atti_out.atti_sp;
+            atti_sp = R_ENU2NED.transpose()*atti_sp*R_FLU2FRD;
+            //to euler
+            Vector3d rpy = quat2eulers(atti_sp);
+            pos_target.yaw = rpy(2);
+            pos_target.yaw_rate = 0;
+            pos_target.velocity.x = 0.0;
+            pos_target.velocity.y = 0.0;
+            pos_target.velocity.z = atti_out.thrust_sp;
+            pos_target.acceleration_or_force.x = 0.0;
+            pos_target.acceleration_or_force.y = 0.0;
+            pos_target.acceleration_or_force.z = 0.0;
+            control_pos_vel_px4_pub.publish(pos_target);
+        }
+#endif
+    }
+
+    void send_dummy_atti_cmd() {
+        //sending dummy cmd to help entering offboard mode
+        if (commander_state.flight_status == swarmtal_msgs::drone_commander_state::FLIGHT_STATUS_IN_AIR) {
+            //Dummy input only
+            mavros_msgs::PositionTarget pos_target;
+            pos_target.header.stamp = ros::Time::now();
+            pos_target.header.frame_id = "world";
+            pos_target.coordinate_frame = mavros_msgs::PositionTarget::FRAME_LOCAL_NED; //Note we send FLU
+            Vector3d acc_sp(0., 0., 9.8);
+            pos_target.type_mask = mavros_msgs::PositionTarget::IGNORE_PX |
+                    mavros_msgs::PositionTarget::IGNORE_PY |
+                    mavros_msgs::PositionTarget::IGNORE_PZ;
+            if (!commander_state.vo_valid) {
+                pos_target.type_mask |= mavros_msgs::PositionTarget::IGNORE_VX |
+                mavros_msgs::PositionTarget::IGNORE_VY;
+            }
+            auto atti_sp = atti_out.atti_sp;
+            atti_sp = R_ENU2NED.transpose()*atti_sp*R_FLU2FRD;
+            //to euler
+            Vector3d rpy = quat2eulers(atti_sp);
+            pos_target.yaw = rpy(2);
+            pos_target.yaw_rate = 0;
+            pos_target.velocity.x = 0.0;
+            pos_target.velocity.y = 0.0;
+            pos_target.velocity.z = 0.0;
+            pos_target.acceleration_or_force.x = 0.0;
+            pos_target.acceleration_or_force.y = 0.0;
+            pos_target.acceleration_or_force.z = 0.0;
+            control_pos_vel_px4_pub.publish(pos_target);
+        } else {
+            AttiCtrlOut atti_out;
+            atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
+            atti_out.thrust_sp = 0.0;
+            atti_out.atti_sp = Eigen::Quaterniond(Eigen::AngleAxisd(yaw_odom, Vector3d::UnitZ()));
+            set_drone_attitude_target(atti_out);
+        }
     }
 
     void control_update(const ros::TimerEvent & e) {
@@ -445,16 +555,16 @@ public:
         float dt = (e.current_real - e.last_real).toSec();
         
         if ((ros::Time::now() - last_cmd_ts).toSec() > MAX_CMD_LOST_TIME) {
-             state.ctrl_mode = drone_pos_ctrl_cmd::CTRL_CMD_IDLE_MODE;
+            state.ctrl_mode = drone_pos_ctrl_cmd::CTRL_CMD_IDLE_MODE;
         }
         if (state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_IDLE_MODE) {
             //IDLE
             ROS_INFO_THROTTLE(1.0, "Position controller idle mode");
             vel_ff = Eigen::Vector3d(0, 0, 0);
             pos_ctrl->reset();
+            send_dummy_atti_cmd();
             return;
         } 
-
         atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
         
         if (state.ctrl_mode < drone_pos_ctrl_cmd::CTRL_CMD_ATT_THRUST_MODE) {

@@ -1,0 +1,13 @@
+<launch>
+    <arg name="vo_topic" default="/vins_estimator/imu_propagate"/>
+    <arg name="output" default="screen" />
+    <arg name="log_path" default="/home/dji/drone_log_latest" />
+    <arg name="config_path" default="/home/dji/SwarmConfig/pos_control_param.yaml" />
+    <node pkg="drone_position_control" name="drone_position_control" type="drone_position_control_node" output="$(arg output)" launch-prefix="nice --20" >
+        <rosparam command="load" file="$(arg config_path)" />
+        <remap from="/drone_position_control/odometry" to="$(arg vo_topic)"/>
+        <remap from="/drone_position_control/fc_attitude" to="/mavros/imu/data"/>
+        <remap from="/drone_position_control/fc_imu" to="/mavros/imu/data_raw"/>
+        <param name="log_path" value="$(arg log_path)" />
+    </node>
+</launch>
