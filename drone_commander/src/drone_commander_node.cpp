@@ -95,6 +95,8 @@ using namespace Eigen;
 #define BATTERY_THRUST_B 0.18333333333333338f
 #define LANDING_VEL_Z_BATTERY_LOW -0.5
 
+#define EPS 0.01
+
 enum class MAV_STATE {
   MAV_STATE_UNINIT,
   MAV_STATE_BOOT,
@@ -1510,7 +1512,7 @@ void DroneCommander::process_control_landing() {
                 printf("landing_thrust is: %f", landing_thrust);
                 is_landing_tail = true;
                 //set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
-
+                set_att_setpoint(0, 0, yaw_vo, state.landing_velocity, true, false);
                 /*
                 bool res = request_drone_landing();
                 if (!res) {
@@ -1625,12 +1627,24 @@ void DroneCommander::send_control_cmd_px4() {
             pos_target.position.x = ctrl_cmd->pos_sp.x;
             pos_target.position.y = ctrl_cmd->pos_sp.y;
             pos_target.position.z = ctrl_cmd->pos_sp.z;
+            if (fabs(vel_sp.x) < EPS && fabs(vel_sp.y) < EPS && fabs(vel_sp.z) < EPS ) {
+                pos_target.type_mask = mavros_msgs::PositionTarget::IGNORE_VX |
+                    mavros_msgs::PositionTarget::IGNORE_VY |
+                    mavros_msgs::PositionTarget::IGNORE_VZ;
+            }
         } else {
             pos_target.type_mask = mavros_msgs::PositionTarget::IGNORE_PX |
                                     mavros_msgs::PositionTarget::IGNORE_PY |
                                     mavros_msgs::PositionTarget::IGNORE_PZ;
             printf("Vel cmd %.2f %.2f %.2f\n", vel_sp.x, vel_sp.y, vel_sp.z);
         }
+
+        if (fabs(acc_sp.x) < EPS && fabs(acc_sp.y) < EPS && fabs(acc_sp.z) < EPS) {
+            pos_target.type_mask = mavros_msgs::PositionTarget::IGNORE_AFX |
+                mavros_msgs::PositionTarget::IGNORE_AFY |
+                mavros_msgs::PositionTarget::IGNORE_AFZ;
+        }
+
         pos_target.velocity = vel_sp;
         pos_target.acceleration_or_force = acc_sp;
         pos_target.yaw = ctrl_cmd->yaw_sp;
