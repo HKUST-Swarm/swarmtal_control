@@ -1412,21 +1412,18 @@ void DroneCommander::process_control_takeoff() {
         reset_ctrl_cmd_max_vel();
         return;
     }
-
-    if (is_in_air && state.vo_valid) {
-        //Already in air, process as a  posvel control
-        ctrl_cmd->max_vel.z = state.takeoff_velocity;
-        set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
-        
-        // ROS_INFO("Already in air, fly to %3.2lf %3.2lf %3.2lf", ctrl_cmd->pos_sp.x, ctrl_cmd->pos_sp.y, ctrl_cmd->pos_sp.z);
-    } else {
-        if (state.vo_valid) {
+    if (state.vo_valid) {
 #if FCHardware == DJI_SDK
+        if (is_in_air) {
+            //Already in air, process as a  posvel control
+            ctrl_cmd->max_vel.z = state.takeoff_velocity;
+            set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
+        } else {
             set_att_setpoint(0, 0, yaw_vo, state.takeoff_velocity, true, false);    
-#else
-            set_vel_setpoint(0, 0,  state.takeoff_velocity, yaw_vo);
-#endif        
         }
+#else
+        set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
+#endif
     }
 
     send_ctrl_cmd();
@@ -1501,7 +1498,8 @@ void DroneCommander::process_control_landing() {
     } else {
         if (state.vo_valid && state.landing_mode == DCMD::LANDING_MODE_XYVEL) {
             if (state.pos.z > LANDING_ATT_MODE_HEIGHT) {
-                set_vel_setpoint(0, 0, state.landing_velocity);
+                // set_vel_setpoint(0, 0, state.landing_velocity);
+                set_pos_setpoint(state.pos.x, state.pos.y, state.pos.z, NAN, 0.0, 0.0, state.landing_velocity);
             } else {
                 landing_thrust = state.bat_vol * BATTERY_THRUST_A + BATTERY_THRUST_B;
                 landing_thrust = float_constrain(landing_thrust, landing_thrust_min, landing_thrust_max);
