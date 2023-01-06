@@ -478,6 +478,7 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
         process_control_mode();
         process_control();
     } else {
+        // printf("No ctrl auth... reseting yaw_sp\n");
         reset_yaw_sp();
         last_hover_count = -1;
     }
@@ -571,7 +572,7 @@ void DroneCommander::try_control_auth(bool auth) {
 
 bool DroneCommander::nead_control_by_this() {
     if (is_px4) {
-        return this->rc_request_onboard();
+        return this->rc_request_vo() || this->rc_request_onboard();
     } else {
         return this->rc_request_vo();
     }
@@ -1630,12 +1631,13 @@ void DroneCommander::prepare_control_hover() {
             bool succ = set_hover_target_position(
                 odometry.pose.pose.position.x, odometry.pose.pose.position.y, odometry.pose.pose.position.z);
             if (succ) {
-                ROS_INFO("Entering hover mode, will hover at %3.2lf %3.2lf %3.2lf h %d c %d",
+                ROS_INFO("Entering hover mode, will hover at %3.2lf %3.2lf %3.2lf h %d c %d yaw_sp %3.2fdeg",
                     hover_pos.x(),
                     hover_pos.y(),
                     hover_pos.z(),
                     last_hover_count,
-                    control_count
+                    control_count,
+                    ctrl_cmd->yaw_sp*57.3
                 );
             } else {
                 fail_to_hover = true;
