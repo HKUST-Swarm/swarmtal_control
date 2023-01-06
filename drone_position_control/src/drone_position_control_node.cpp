@@ -42,6 +42,7 @@ class DronePosControl {
     ros::Subscriber drone_pos_cmd_sub;
     ros::Subscriber fc_att_sub;
     ros::Subscriber imu_data_sub;
+    ros::Subscriber sub_atti_target;
 
     RotorPositionControl * pos_ctrl = nullptr;
 
@@ -64,6 +65,7 @@ class DronePosControl {
     //RPY, this is in NED
     Eigen::Vector3d odom_att_rpy;
     Eigen::Vector3d fc_att_rpy;
+    Eigen::Vector3d fc_att_target;
 
 
     ros::Publisher state_pub;
@@ -217,12 +219,12 @@ public:
         fc_att_sub = nh.subscribe("fc_attitude", 1, &DronePosControl::onFCAttitude, this, ros::TransportHints().tcpNoDelay());
         imu_data_sub = nh.subscribe("fc_imu", 1, &DronePosControl::on_imu_data, this, ros::TransportHints().tcpNoDelay());
         commander_state_sub = nh.subscribe("/drone_commander/swarm_commander_state", 1, &DronePosControl::on_commander_state, this, ros::TransportHints().tcpNoDelay());
-
 #if FCHardware == DJI_SDK
         control_pub = nh.advertise<sensor_msgs::Joy>("dji_sdk_control", 1);
 #else
         control_pub = nh.advertise<mavros_msgs::AttitudeTarget>("/mavros/setpoint_raw/attitude", 1);
         control_pos_vel_px4_pub = nh.advertise<mavros_msgs::PositionTarget>("/mavros/setpoint_raw/local", 1);
+        sub_atti_target = nh.subscribe("/mavros/setpoint_raw/target_attitude", 1, &DronePosControl::onFCAttitudeTarget, this, ros::TransportHints().tcpNoDelay());
 #endif
         start_time = last_cmd_ts = ros::Time::now();
     }   
@@ -311,6 +313,15 @@ public:
         printf("FC Raw Yaw %3.2f deg pitch %3.2f deg roll %3.2f deg\n", rpy_raw.z()*180/M_PI, rpy_raw.y()*180/M_PI, rpy_raw.x()*180/M_PI);
     }
 #endif
+
+    void onFCAttitudeTarget(const mavros_msgs::AttitudeTarget atti_target) {
+        auto quat = atti_target.orientation;
+        auto q = ENU2NED(Eigen::Quaterniond(quat.w, quat.x, quat.y, quat.z));
+        Eigen::Quaterniond q_raw(quat.w, quat.x, quat.y, quat.z);
+        Eigen::Vector3d rpy = quat2eulers(q_raw);
+        printf("onFCAttitudeTarget(ENU) yaw %3.2f deg pitch %3.2f deg roll %3.2f deg\n", rpy.z()*180/M_PI, 
+            rpy.y()*180/M_PI, rpy.x()*180/M_PI);
+    }
 
     void set_drone_global_pos_vel_att(Eigen::Vector3d pos, Eigen::Vector3d vel, Eigen::Quaterniond quat) {
         pos_ctrl->set_pos(pos);
@@ -471,7 +482,7 @@ public:
             att_target.header.stamp = ros::Time::now();
             att_target.header.frame_id = "world";
             att_target.type_mask = mavros_msgs::AttitudeTarget::IGNORE_ROLL_RATE |
-                                    mavros_msgs::AttitudeTarget::IGNORE_PITCH_RATE;
+                                    mavros_msgs::AttitudeTarget::IGNORE_PITCH_RATE | mavros_msgs::AttitudeTarget::IGNORE_YAW_RATE;
             auto atti_sp_out = atti_out.atti_sp;
             if (!state.use_fc_yaw) {
                 //Rotated 
@@ -486,7 +497,7 @@ public:
             att_target.thrust = atti_out.thrust_sp;
             control_pub.publish(att_target);
             auto rpy = quat2eulers(atti_sp_out);
-            // printf("Real SP yaw %3.2f pitch %3.2f roll %3.2f\n", rpy.z()*57.3, rpy.y()*57.3, rpy.x()*57.3);
+            printf("Real SP yaw %3.2f pitch %3.2f roll %3.2f\n", rpy.z()*57.3, rpy.y()*57.3, rpy.x()*57.3);
         } else if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_VELZ) {
             //Dummy input only
             mavros_msgs::PositionTarget pos_target;
@@ -518,6 +529,7 @@ public:
 
     void send_dummy_atti_cmd() {
         //sending dummy cmd to help entering offboard mode
+        printf("is sending dummy cmd yaw %3.2f\n", yaw_odom*57.3);
         if (commander_state.flight_status == swarmtal_msgs::drone_commander_state::FLIGHT_STATUS_IN_AIR) {
             atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
             atti_out.thrust_sp = pos_ctrl->thrust_ctrl.get_level_thrust();
@@ -627,6 +639,7 @@ public:
             }
         }
             
+        printf("is sending cmd yaw %3.2f\n", atti_out.yaw_sp*57.3);
         set_drone_attitude_target(atti_out);
         
         state.pos_sp.x = pos_sp.x();
