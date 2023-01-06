@@ -1,7 +1,7 @@
 <launch>
     <arg name="vo_topic" default="/vins_estimator/imu_propagate"/>
     <arg name="output" default="screen" />
-    <arg name="log_path" default="/home/dji/drone_log_latest" />
+    <arg name="log_path" default="/home/dji/swarm_log_latest/" />
     <arg name="config_path" default="/home/dji/SwarmConfig/pos_control_param.yaml" />
     <node pkg="drone_position_control" name="drone_position_control" type="drone_position_control_node" output="$(arg output)" launch-prefix="nice --20" >
         <rosparam command="load" file="$(arg config_path)" />

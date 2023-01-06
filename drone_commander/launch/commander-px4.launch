@@ -12,6 +12,7 @@
         <remap from="/drone_commander/fc_imu_fused" to="/mavros/imu/data"/>
         <param name="rc_fail_detection" type="bool" value="false" />
         <rosparam command="load" file="$(arg config_path)" />
+        <param name="max_vo_latency" value="1.0" />
     </node>
     <include file="$(find drone_position_control)/launch/pos_control-px4.launch">
         <arg name="vo_topic" value="$(arg vo_topic)"/>

@@ -319,7 +319,7 @@ protected:
 
     void prepare_control_hover();
 
-    void set_hover_target_position(double x, double y, double z);
+    bool set_hover_target_position(double x, double y, double z);
 
     void process_control_idle();
     void process_control_takeoff();
@@ -355,6 +355,17 @@ protected:
 
     void sendPX4SystemActive();
     void sendPX4SystemInactive();
+
+    Eigen::Quaterniond FLU2NED(const Eigen::Quaterniond & q) {
+        Matrix3d R = R_FLU2FRD * q.toRotationMatrix() * R_FLU2FRD;
+        return Eigen::Quaterniond(R);
+    }
+
+    Eigen::Quaterniond ENU2NED(const Eigen::Quaterniond & q) {
+        Matrix3d R = R_ENU2NED*q.toRotationMatrix()*R_FLU2FRD;
+        return Eigen::Quaterniond(R);
+    }
+
 };
 
 
@@ -617,10 +628,10 @@ void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
     bool vo_valid = is_odom_valid(_odom);
     //printf("VO valid %d", vo_valid);
     auto pose = _odom.pose.pose;
-    Eigen::Quaterniond quat(pose.orientation.w, 
-        pose.orientation.x, pose.orientation.y, pose.orientation.z);
+    auto quat = FLU2NED(Eigen::Quaterniond(pose.orientation.w, 
+        pose.orientation.x, pose.orientation.y, pose.orientation.z));
     Eigen::Vector3d rpy = quat2eulers(quat);
-    yaw_vo = - rpy.z();
+    yaw_vo = rpy.z();
     if (!state.vo_valid && vo_valid) {
         //Vo first time come
         //reset yaw sp use vo yaw
@@ -756,20 +767,10 @@ void DroneCommander::flight_status_callback(const std_msgs::UInt8 & _flight_stat
 
 void DroneCommander::fc_attitude_callback(const geometry_msgs::QuaternionStamped & _quat) {
     geometry_msgs::Quaternion quat = _quat.quaternion;
-
-
-
-    Eigen::Quaterniond q(quat.w, quat.x, quat.y, quat.z);
-
-    Eigen::Matrix3d RFLU2ENU = q.toRotationMatrix();
-
-    q = Eigen::Quaterniond(R_ENU2NED*RFLU2ENU*R_FLU2FRD.transpose());
-
+    auto q = ENU2NED(Eigen::Quaterniond(quat.w, quat.x, quat.y, quat.z));
     Eigen::Vector3d rpy = quat2eulers(q);
-
     //Original rpy is ENU, we need NED rpy
     yaw_fc = rpy.z();
-
 }
 
 void DroneCommander::on_imu_data(const sensor_msgs::Imu & _imu) {
@@ -787,9 +788,7 @@ void DroneCommander::on_imu_data(const sensor_msgs::Imu & _imu) {
 
 void DroneCommander::on_imu_data_fused(const sensor_msgs::Imu & _imu) {
     geometry_msgs::Quaternion quat = _imu.orientation;
-    Eigen::Quaterniond q(quat.w, quat.x, quat.y, quat.z);
-    Eigen::Matrix3d RFLU2ENU = q.toRotationMatrix();
-    q = Eigen::Quaterniond(R_ENU2NED*RFLU2ENU*R_FLU2FRD.transpose());
+    auto q = ENU2NED(Eigen::Quaterniond(quat.w, quat.x, quat.y, quat.z));
     Eigen::Vector3d rpy = quat2eulers(q);
     //Original rpy is ENU, we need NED rpy
     yaw_fc = rpy.z();
@@ -1609,12 +1608,14 @@ void DroneCommander::send_ctrl_cmd() {
 }
 
 
-void DroneCommander::set_hover_target_position(double x, double y, double z) {
+bool DroneCommander::set_hover_target_position(double x, double y, double z) {
     if (state.is_armed && state.vo_valid && state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR && state.control_auth == DCMD::CTRL_AUTH_THIS) {
         hover_pos = Eigen::Vector3d(x, y, z);
         set_pos_setpoint(x, y, z);
         last_hover_count = control_count;
+        return true;
     }
+    return false;
 }
 
 void DroneCommander::prepare_control_hover() {
@@ -1626,20 +1627,24 @@ void DroneCommander::prepare_control_hover() {
             fabs(odometry.twist.twist.linear.z) > DANGER_SPEED_HOVER) {
             fail_to_hover = true;
         } else {
-            set_hover_target_position(
+            bool succ = set_hover_target_position(
                 odometry.pose.pose.position.x, odometry.pose.pose.position.y, odometry.pose.pose.position.z);
-            ROS_INFO("Entering hover mode, will hover at %3.2lf %3.2lf %3.2lf h %d c %d",
-                hover_pos.x(),
-                hover_pos.y(),
-                hover_pos.z(),
-                last_hover_count,
-                control_count
-            );
+            if (succ) {
+                ROS_INFO("Entering hover mode, will hover at %3.2lf %3.2lf %3.2lf h %d c %d",
+                    hover_pos.x(),
+                    hover_pos.y(),
+                    hover_pos.z(),
+                    last_hover_count,
+                    control_count
+                );
+            } else {
+                fail_to_hover = true;
+            }
         }
     }
 
     if (fail_to_hover) {
-        if (state.is_armed) {
+        if (state.is_armed && state.control_auth == DCMD::CTRL_AUTH_THIS) {
             ROS_INFO("Onboard trying to Landing because try to hover failed");
             state.landing_mode = DCMD::LANDING_MODE_ATT;       
             state.landing_velocity = LANDING_VEL_Z_EMERGENCY;

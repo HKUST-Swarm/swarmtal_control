@@ -52,7 +52,7 @@ def parse_csv_data(csv_path, lt=0, rt=1000000):
     ans['acc_sp'] = data[l:r,17:20]
     ans["rpy_sp"] = data[l:r,20:23]
     ans["thr_sp"] = data[l:r,23]
-    ans['rpy_fc'] = data[l:r,24:26]
+    ans['rpy_fc'] = data[l:r,24:27]
     return ans
 
 def anaylze_csv(dataname, l=0, r=100000, plot=True):
@@ -69,7 +69,6 @@ def anaylze_csv(dataname, l=0, r=100000, plot=True):
 
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
-        ax = fig.gca(projection='3d')
         ax.plot(csv_data['pos'][:,0], csv_data['pos'][:,1], csv_data['pos'][:,2], label="POS")
         ax.plot(csv_data['pos_sp'][:,0], csv_data['pos_sp'][:,1], csv_data['pos_sp'][:,2], label="POS_SP")
 
@@ -205,8 +204,8 @@ def anaylze_csv(dataname, l=0, r=100000, plot=True):
         ax = plt.subplot(312)
     #     plt.title("Roll")
         plt.plot(_t, csv_data['rpy_sp'][:,1]*57.296, label="pitch_cmd")
-        plt.plot(_t, -csv_data['rpy_fc'][:,1]*57.296, label="pitch_fc")
-        plt.plot(_t, -csv_data['rpy'][:,1]*57.296, label="pitch_actual")
+        plt.plot(_t, csv_data['rpy_fc'][:,1]*57.296, label="pitch_fc")
+        plt.plot(_t, csv_data['rpy'][:,1]*57.296, label="pitch_actual")
         plt.setp(ax.get_xticklabels(), visible=False)
         plt.ylabel("Pitch (deg)")
 #         plt.ylim(-10, 10) 
@@ -216,7 +215,7 @@ def anaylze_csv(dataname, l=0, r=100000, plot=True):
 
         ax = plt.subplot(313)
     #     plt.title("Yaw")
-    #     plt.plot(_t, -csv_data['rpy_fc'][:,2]*57.296, label="yaw_fc")
+        plt.plot(_t, csv_data['rpy_fc'][:,2]*57.296, label="yaw_fc")
         plt.plot(_t, csv_data['rpy'][:,2]*57.296, label="yaw_actual")
         plt.plot(_t, csv_data['rpy_sp'][:,2]*57.296, label="yaw_cmd")
         plt.ylabel("Yaw (deg)")
