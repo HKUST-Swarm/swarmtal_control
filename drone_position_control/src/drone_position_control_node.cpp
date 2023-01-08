@@ -78,6 +78,7 @@ class DronePosControl {
     double yaw_fc = 0;
     double thrust_limit;
     double filtered_thrust = 0;
+    double max_thrust = 1.0;
 
     ros::Time last_cmd_ts, start_time;
 
@@ -494,7 +495,7 @@ public:
             att_target.orientation.y = atti_sp_out.y();
             att_target.orientation.z = atti_sp_out.z();
             att_target.body_rate.z = 0; //yaw rate tmp to be zero
-            att_target.thrust = atti_out.thrust_sp;
+            att_target.thrust = float_constrain(atti_out.thrust_sp, 0.0, thrust_limit);
             control_pub.publish(att_target);
             auto rpy = quat2eulers(atti_sp_out);
             // printf("Real SP yaw %3.2f pitch %3.2f roll %3.2f\n", rpy.z()*57.3, rpy.y()*57.3, rpy.x()*57.3);
@@ -536,7 +537,7 @@ public:
             state.yaw_sp = yaw_odom;
             atti_out.yaw_sp = yaw_odom;
             set_drone_attitude_target(atti_out);
-        } else if (commander_state.is_armed) {
+        } else {
             atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
             atti_out.thrust_sp = 0.0;
             atti_out.atti_sp = Eigen::Quaterniond(Eigen::AngleAxisd(yaw_odom, Vector3d::UnitZ()));
@@ -606,7 +607,7 @@ public:
 #else
             atti_out.thrust_sp = acc_sp.z() + pos_ctrl->thrust_ctrl.get_level_thrust();
             atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
-            filtered_thrust = lowpass_filter(atti_out.thrust_sp, 1, filtered_thrust, dt);
+            filtered_thrust = lowpass_filter(atti_out.thrust_sp, 1, filtered_thrust, dt); // This is for find hover thrust
 #endif
             if (state.count % 5 == 0)
             {

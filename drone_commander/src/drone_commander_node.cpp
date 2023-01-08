@@ -88,8 +88,6 @@ using namespace Eigen;
 
 #define DANGER_SPEED_HOVER (RC_MAX_TILT_VEL+1.5)
 
-#define BATTERY_THRUST_A -0.005555555555555558f 
-#define BATTERY_THRUST_B 0.18333333333333338f
 #define LANDING_VEL_Z_BATTERY_LOW -0.5
 
 #define EPS 0.01
@@ -214,7 +212,6 @@ class DroneCommander {
 
 
     double landing_thrust = 0.035;
-    double landing_thrust_min = 0.035, landing_thrust_max = 0.06;
 
     bool pos_sp_inited = false;
     bool is_px4 = false;
@@ -250,8 +247,7 @@ public:
         loop_timer = nh.createTimer(ros::Duration(LOOP_DURATION), &DroneCommander::loop, this);
 
         nh.param<bool>("rc_fail_detection", rc_fail_detection, true);
-        nh.param<double>("landing_thrust_min", landing_thrust_min, 0.0);
-        nh.param<double>("landing_thrust_max", landing_thrust_max, 0.0);
+        nh.param<double>("landing_thrust", landing_thrust, 0.2);
         nh.param<double>("max_vo_latency", MAX_VO_LATENCY, 0.4);
         nh.param<double>("BATTERY_REMAIN_PARAM_A", BATTERY_REMAIN_PARAM_A, 345.375);
         nh.param<double>("BATTERY_REMAIN_PARAM_B", BATTERY_REMAIN_PARAM_B, -4757.3);
@@ -497,20 +493,17 @@ bool DroneCommander::callArmService(bool arm) {
     ROS_INFO("Try arm/disarm success %d", arm_srv.response.result);
     return arm_srv.response.result;
 #else 
-    if (arm) {
-        mavros_msgs::CommandBool arm_cmd;
-        arm_cmd.request.value = arm;
-        ros::service::call("/mavros/cmd/arming", arm_cmd);
-        ROS_INFO("Try arm %d success %d", arm, arm_cmd.response.success);
-        return arm_cmd.response.success;
-    } else {
-        mavros_msgs::CommandLong cmd_long;
-        cmd_long.request.command = 400;
-        cmd_long.request.param2 = 21196;
-        ros::service::call("/mavros/cmd/command", cmd_long);
-        ROS_INFO("Try kill %d success %d", cmd_long.response.success);
-        return cmd_long.response.success;
-    }
+    //     mavros_msgs::CommandLong cmd_long;
+    //     cmd_long.request.command = 400;
+    //     cmd_long.request.param2 = 21196;
+    //     ros::service::call("/mavros/cmd/command", cmd_long);
+    //     ROS_INFO("Try kill %d success %d", cmd_long.response.success);
+    //     return cmd_long.response.success;
+    mavros_msgs::CommandBool arm_cmd;
+    arm_cmd.request.value = arm;
+    ros::service::call("/mavros/cmd/arming", arm_cmd);
+    ROS_INFO("Try arm %d success %d", arm, arm_cmd.response.success);
+    return arm_cmd.response.success;
     return false;
 #endif
 }
@@ -1350,7 +1343,8 @@ void DroneCommander::process_control_takeoff() {
             ctrl_cmd->max_vel.z = state.takeoff_velocity;
             set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
         } else {
-            set_att_setpoint(0, 0, yaw_vo, state.takeoff_velocity, true, false);    
+            set_vel_setpoint(0, 0, state.takeoff_velocity);
+            // set_att_setpoint(0, 0, yaw_vo, state.takeoff_velocity, true, false);    
         }
     }
 
@@ -1415,6 +1409,7 @@ void DroneCommander::process_control_landing() {
             ROS_INFO("Touch ground, thrust set to zero");
             //Actually thrust protection will only keep thrust at a low value but not 0. 0.0 is just for convenience
             set_att_setpoint(0, 0, yaw_vo, 0.0, false, false);
+            is_landing_finish = true;
         }
         else {
             set_att_setpoint(0, 0, yaw_vo, landing_thrust, false, false);
@@ -1426,12 +1421,7 @@ void DroneCommander::process_control_landing() {
                 set_vel_setpoint(0, 0, state.landing_velocity);
                 // set_pos_setpoint(state.pos.x, state.pos.y, state.pos.z, NAN, 0.0, 0.0, state.landing_velocity);
             } else {
-                landing_thrust = state.bat_vol * BATTERY_THRUST_A + BATTERY_THRUST_B;
-                landing_thrust = float_constrain(landing_thrust, landing_thrust_min, landing_thrust_max);
                 ROS_INFO("battery is: %f", state.bat_vol);
-                ROS_INFO("raw thrust is: %f", state.bat_vol * BATTERY_THRUST_A + BATTERY_THRUST_B);
-                ROS_INFO("landing_thrust min is: %f", landing_thrust_min);
-                ROS_INFO("landing_thrust max is: %f", landing_thrust_max);
                 printf("landing_thrust is: %f", landing_thrust);
                 is_landing_tail = true;
                 set_att_setpoint(0, 0, yaw_vo, state.landing_velocity, true, false);
@@ -1446,7 +1436,7 @@ void DroneCommander::process_control_landing() {
             }
 
         } else {
-            set_att_setpoint(0, 0, yaw_vo, state.landing_velocity, true, false);
+            set_att_setpoint(0, 0, yaw_vo, landing_thrust, false, false);
         }
         send_ctrl_cmd();
     }
