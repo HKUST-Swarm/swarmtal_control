@@ -310,7 +310,7 @@ public:
         //         atti_out.yaw_sp*180/M_PI, state.yaw_sp*180/M_PI, atti_out.pitch_sp*180/M_PI, atti_out.roll_sp*180/M_PI, 
         //         yaw_offset*180/M_PI);
         // printf("NED Yaw %3.2f deg pitch %3.2f deg roll %3.2f deg\n", rpy.z()*180/M_PI, rpy.y()*180/M_PI, rpy.x()*180/M_PI);
-        printf("FC Raw Yaw %3.2f deg pitch %3.2f deg roll %3.2f deg\n", rpy_raw.z()*180/M_PI, rpy_raw.y()*180/M_PI, rpy_raw.x()*180/M_PI);
+        // printf("FC Raw Yaw %3.2f deg pitch %3.2f deg roll %3.2f deg\n", rpy_raw.z()*180/M_PI, rpy_raw.y()*180/M_PI, rpy_raw.x()*180/M_PI);
     }
 #endif
 
@@ -319,8 +319,8 @@ public:
         auto q = ENU2NED(Eigen::Quaterniond(quat.w, quat.x, quat.y, quat.z));
         Eigen::Quaterniond q_raw(quat.w, quat.x, quat.y, quat.z);
         Eigen::Vector3d rpy = quat2eulers(q_raw);
-        printf("onFCAttitudeTarget(ENU) yaw %3.2f deg pitch %3.2f deg roll %3.2f deg\n", rpy.z()*180/M_PI, 
-            rpy.y()*180/M_PI, rpy.x()*180/M_PI);
+        // printf("onFCAttitudeTarget(ENU) yaw %3.2f deg pitch %3.2f deg roll %3.2f deg\n", rpy.z()*180/M_PI, 
+            // rpy.y()*180/M_PI, rpy.x()*180/M_PI);
     }
 
     void set_drone_global_pos_vel_att(Eigen::Vector3d pos, Eigen::Vector3d vel, Eigen::Quaterniond quat) {
@@ -497,7 +497,7 @@ public:
             att_target.thrust = atti_out.thrust_sp;
             control_pub.publish(att_target);
             auto rpy = quat2eulers(atti_sp_out);
-            printf("Real SP yaw %3.2f pitch %3.2f roll %3.2f\n", rpy.z()*57.3, rpy.y()*57.3, rpy.x()*57.3);
+            // printf("Real SP yaw %3.2f pitch %3.2f roll %3.2f\n", rpy.z()*57.3, rpy.y()*57.3, rpy.x()*57.3);
         } else if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_VELZ) {
             //Dummy input only
             mavros_msgs::PositionTarget pos_target;
@@ -536,7 +536,6 @@ public:
             state.yaw_sp = yaw_odom;
             atti_out.yaw_sp = yaw_odom;
             set_drone_attitude_target(atti_out);
-            printf("is sending dummy cmd yaw %3.2f\n", yaw_odom*57.3);
         } else if (commander_state.is_armed) {
             atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
             atti_out.thrust_sp = 0.0;
@@ -544,7 +543,6 @@ public:
             state.yaw_sp = yaw_odom;
             atti_out.yaw_sp = yaw_odom;
             set_drone_attitude_target(atti_out);
-            printf("is sending dummy cmd yaw %3.2f\n", yaw_odom*57.3);
         }
     }
 
@@ -652,7 +650,6 @@ public:
             }
         }
             
-        printf("is sending cmd yaw %3.2f\n", atti_out.yaw_sp*57.3);
         set_drone_attitude_target(atti_out);
         
         state.pos_sp.x = pos_sp.x();
