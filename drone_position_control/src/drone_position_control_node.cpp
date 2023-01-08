@@ -443,7 +443,7 @@ public:
     }
 
 
-    void set_drone_attitude_target(AttiCtrlOut atti_out) {
+    void set_drone_attitude_target(AttiCtrlOut atti_out, bool force_ignore_yaw=false) {
 #if FCHardware == DJI_SDK
         //Use dji ros to set drone attitude target
         sensor_msgs::Joy dji_command_so3; //! @note for dji ros wrapper
@@ -529,7 +529,6 @@ public:
 
     void send_dummy_atti_cmd() {
         //sending dummy cmd to help entering offboard mode
-        printf("is sending dummy cmd yaw %3.2f\n", yaw_odom*57.3);
         if (commander_state.flight_status == swarmtal_msgs::drone_commander_state::FLIGHT_STATUS_IN_AIR) {
             atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
             atti_out.thrust_sp = pos_ctrl->thrust_ctrl.get_level_thrust();
@@ -537,13 +536,15 @@ public:
             state.yaw_sp = yaw_odom;
             atti_out.yaw_sp = yaw_odom;
             set_drone_attitude_target(atti_out);
-        } else {
+            printf("is sending dummy cmd yaw %3.2f\n", yaw_odom*57.3);
+        } else if (commander_state.is_armed) {
             atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
             atti_out.thrust_sp = 0.0;
             atti_out.atti_sp = Eigen::Quaterniond(Eigen::AngleAxisd(yaw_odom, Vector3d::UnitZ()));
             state.yaw_sp = yaw_odom;
             atti_out.yaw_sp = yaw_odom;
             set_drone_attitude_target(atti_out);
+            printf("is sending dummy cmd yaw %3.2f\n", yaw_odom*57.3);
         }
     }
 
@@ -564,7 +565,8 @@ public:
         } 
         atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
         
-        if (state.ctrl_mode < drone_pos_ctrl_cmd::CTRL_CMD_ATT_THRUST_MODE) {
+        if (state.ctrl_mode < drone_pos_ctrl_cmd::CTRL_CMD_ATT_THRUST_MODE || 
+                (FCHardware == PX4 && state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_ATT_VELZ_MODE)) {
             if (state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_POS_MODE) {
                 vel_sp = pos_ctrl->control_pos(pos_sp, dt) + vel_ff;
                 vel_sp.x() = float_constrain(vel_sp.x(), -state.max_vel.x, state.max_vel.x);
@@ -573,8 +575,17 @@ public:
             } else {
                 pos_ctrl->position_controller_reset();
             }
-            
-            acc_sp = pos_ctrl->control_vel(vel_sp, dt);
+            if (state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_POS_MODE || 
+                    state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_VEL_MODE) {
+                acc_sp = pos_ctrl->control_vel(vel_sp, dt);
+            } else if (state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_ATT_VELZ_MODE) {
+                atti_out.atti_sp = att_sp;
+                Eigen::Vector3d rpy = quat2eulers(atti_out.atti_sp);
+                atti_out.roll_sp = rpy.x();
+                atti_out.pitch_sp = rpy.y();
+                atti_out.yaw_sp = rpy.z();
+                acc_sp.setZero();
+            }
 
             acc_sp.z() =  pos_ctrl->control_vel_z(vel_sp.z(), dt);
 
@@ -618,12 +629,14 @@ public:
                     atti_out.abx_sp,
                     pos_ctrl->thrust_ctrl.acc
                 );
-                ROS_INFO("R %4.3f P %4.3f Y %4.3f thr : %3.2f", 
+                ROS_INFO("R %4.3f P %4.3f Y %4.3f Real %4.3f %4.3f %4.3f thr : %3.2f", 
                     atti_out.roll_sp * 57.3,
                     atti_out.pitch_sp * 57.3,
                     atti_out.yaw_sp * 57.3,
-                    atti_out.thrust_sp
-                );
+                    odom_att_rpy.x(),
+                    odom_att_rpy.y(),
+                    odom_att_rpy.z(),
+                    atti_out.thrust_sp);
             }
         } else {
             atti_out.atti_sp = att_sp;

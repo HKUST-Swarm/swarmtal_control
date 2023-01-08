@@ -88,9 +88,6 @@ using namespace Eigen;
 
 #define DANGER_SPEED_HOVER (RC_MAX_TILT_VEL+1.5)
 
-#define BATTERY_REMAIN_CUTOFF 240.0f
-#define BATTERY_REMAIN_PARAM_A 345.375f 
-#define BATTERY_REMAIN_PARAM_B -4757.3f
 #define BATTERY_THRUST_A -0.005555555555555558f 
 #define BATTERY_THRUST_B 0.18333333333333338f
 #define LANDING_VEL_Z_BATTERY_LOW -0.5
@@ -200,6 +197,9 @@ class DroneCommander {
     double yaw_vo = 0;
 
     double MAX_VO_LATENCY;
+    double BATTERY_REMAIN_CUTOFF;
+    double BATTERY_REMAIN_PARAM_A;
+    double BATTERY_REMAIN_PARAM_B;
 
     bool yaw_sp_inited = false;
 
@@ -253,6 +253,9 @@ public:
         nh.param<double>("landing_thrust_min", landing_thrust_min, 0.0);
         nh.param<double>("landing_thrust_max", landing_thrust_max, 0.0);
         nh.param<double>("max_vo_latency", MAX_VO_LATENCY, 0.4);
+        nh.param<double>("BATTERY_REMAIN_PARAM_A", BATTERY_REMAIN_PARAM_A, 345.375);
+        nh.param<double>("BATTERY_REMAIN_PARAM_B", BATTERY_REMAIN_PARAM_B, -4757.3);
+        nh.param<double>("BATTERY_REMAIN_CUTOFF", BATTERY_REMAIN_CUTOFF, 240.0);
 
 
         if (rc_fail_detection) {
@@ -474,10 +477,10 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
     
     process_input_source();
 
-    if (check_control_auth()){
-        process_control_mode();
-        process_control();
-    } else {
+    process_control_mode();
+    process_control();
+
+    if (!check_control_auth()) {
         // printf("No ctrl auth... reseting yaw_sp\n");
         reset_yaw_sp();
         last_hover_count = -1;
