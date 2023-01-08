@@ -886,7 +886,6 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
                 double ay_ff = ((double)_cmd.param9) / 10000;
                 double az_ff = ((double)_cmd.param10) / 10000;
 
-                // ROS_INFO("Recv pos cmd, fly to %3.2 %3.2f %3.2f", x, y, z);
                 if (_cmd.param4 == MAGIC_YAW_NAN) {
                     set_pos_setpoint(x, y, z, NAN, vx_ff, vy_ff, vz_ff, ax_ff, ay_ff, az_ff);
                 } else {
@@ -1338,7 +1337,7 @@ void DroneCommander::process_control_takeoff() {
         return;
     }
     if (state.vo_valid) {
-        if (is_in_air) {
+        if (is_in_air || (pos.z - takeoff_origin.z() > MIN_TAKEOFF_HEIGHT)) {
             //Already in air, process as a  posvel control
             ctrl_cmd->max_vel.z = state.takeoff_velocity;
             set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());

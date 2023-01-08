@@ -325,9 +325,9 @@ public:
             printf("Yaw rate: dyaw %3.2f\n", yaw_cmd.yaw_sp*57.3);
         }
 
-        printf("In CTRL accsp %3.2f %3.2f %3.2f\nsp p %3.2f r %3.2f y %3.2f\n",
-            acc_sp.x(), acc_sp.y(), acc_sp.z(),
-            pitch_sp, roll_sp, yaw_sp);
+        // printf("In CTRL accsp %3.2f %3.2f %3.2f\nsp p %3.2f r %3.2f y %3.2f\n",
+        //     acc_sp.x(), acc_sp.y(), acc_sp.z(),
+        //     pitch_sp, roll_sp, yaw_sp);
         ret.roll_sp = roll_sp;
         ret.pitch_sp = pitch_sp;
         ret.yaw_sp = yaw_sp;

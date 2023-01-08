@@ -17,5 +17,6 @@
     <include file="$(find drone_position_control)/launch/pos_control-px4.launch">
         <arg name="vo_topic" value="$(arg vo_topic)"/>
         <arg name="config_path" value="$(arg config_path)"/>
+        <arg name="output" default="log" />
     </include>
 </launch>
