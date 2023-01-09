@@ -20,10 +20,10 @@ def parse_csv_data(csv_path, lt=0, rt=1000000):
     data =  np.genfromtxt(csv_path, delimiter=',')   
     l = 0
     r = len(data[:,0]) - 1
-    while data[l, 0] < lt:
+    while data[l, 0] - data[0,0] < lt:
         l += 1
         
-    while data[r, 0] > rt:
+    while data[r, 0]  - data[0,0] > rt:
         r -= 1
     
     # print(f"Find time {lt}:{rt}s with {l}:{r}")
