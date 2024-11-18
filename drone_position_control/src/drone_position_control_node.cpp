@@ -6,8 +6,9 @@
 #include <geometry_msgs/QuaternionStamped.h>
 #include <nav_msgs/Odometry.h>
 #include <thread>
-#include <ctime>
-#include <time.h>
+#include <chrono>
+#include <fstream>
+
 #include <stdlib.h>
 #include <swarmtal_msgs/drone_pos_control_state.h>
 #include <swarmtal_msgs/drone_pos_ctrl_cmd.h>
@@ -17,6 +18,7 @@
 #include <swarmtal_msgs/drone_onboard_command.h>
 #include <swarmtal_msgs/drone_commander_state.h>
 #include <mavros_msgs/PositionTarget.h>
+#include <mavros_msgs/AttitudeTarget.h>
 
 using namespace swarmtal_msgs;
 #define MAX_CMD_LOST_TIME 0.5f
@@ -24,16 +26,7 @@ using namespace swarmtal_msgs;
 #define ANGULARRATE_MIX 0.9
 #define MAX_ACC 8 // max accerelation
 
-#define PX4 0 
-#define DJI_SDK 1
-// #define FCHardware DJI_SDK
-#define FCHardware PX4
-
-#if FCHardware == PX4
-#include <mavros_msgs/AttitudeTarget.h>
-#endif
-
-
+std::string generateLogPath(const std::string& folder_path);
 
 class DronePosControl {
     ros::NodeHandle & nh;
@@ -220,39 +213,29 @@ public:
         fc_att_sub = nh.subscribe("fc_attitude", 1, &DronePosControl::onFCAttitude, this, ros::TransportHints().tcpNoDelay());
         imu_data_sub = nh.subscribe("fc_imu", 1, &DronePosControl::on_imu_data, this, ros::TransportHints().tcpNoDelay());
         commander_state_sub = nh.subscribe("/drone_commander/swarm_commander_state", 1, &DronePosControl::on_commander_state, this, ros::TransportHints().tcpNoDelay());
-#if FCHardware == DJI_SDK
-        control_pub = nh.advertise<sensor_msgs::Joy>("dji_sdk_control", 1);
-#else
         control_pub = nh.advertise<mavros_msgs::AttitudeTarget>("/mavros/setpoint_raw/attitude", 1);
         control_pos_vel_px4_pub = nh.advertise<mavros_msgs::PositionTarget>("/mavros/setpoint_raw/local", 1);
         sub_atti_target = nh.subscribe("/mavros/setpoint_raw/target_attitude", 1, &DronePosControl::onFCAttitudeTarget, this, ros::TransportHints().tcpNoDelay());
-#endif
         start_time = last_cmd_ts = ros::Time::now();
     }   
 
     void init_log_file() {
-        time_t rawtime;
-        struct tm * timeinfo;
-        char buffer[80] = {0};
-        time (&rawtime);
-        timeinfo = localtime(&rawtime);
-        int r = rand();  
-        char str[100] = {0};
+        auto csv_path = generateLogPath(log_path);
+        std::ostringstream oss;
+        oss << log_path << "/log_list.txt";
 
-        sprintf(buffer, "/home/dji/swarm_log_latest/control.csv", r);
-
-        FILE* flog_list = fopen("/home/dji/swarm_log_latest/log_list.txt", "a");
-        if (flog_list != nullptr) {
-            fprintf(flog_list,"%s\n", buffer);
-            fflush(flog_list);
-            fclose(flog_list);
+        std::ofstream flog_list;
+        flog_list.open(oss.str(), std::ios_base::app);
+        if (flog_list.is_open()) {
+            flog_list << csv_path << std::endl;
+            flog_list.close();
         } else {
             ROS_ERROR("Can't open loglist file");
         }
 
-        ROS_INFO("opening %s as log", buffer);
+        ROS_INFO("Try to open %s as log", csv_path.c_str());
 
-        log_file = fopen(buffer,"w");
+        log_file = fopen(csv_path.c_str(),"w");
         if (log_file != nullptr) {
             ROS_INFO("Log inited");
         } else {
@@ -273,32 +256,8 @@ public:
         angular_rate.y() = _imu.angular_velocity.y;// * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.y();
         angular_rate.z() = _imu.angular_velocity.z;// * (1-ANGULARRATE_MIX) + ANGULARRATE_MIX*angular_rate.z();
         pos_ctrl->set_body_acc(acc);
-#if FCHardware == DJI_SDK
-        geometry_msgs::Quaternion quat = _imu.orientation;
-        Eigen::Quaterniond q(quat.w, quat.x, quat.y, quat.z);
-        Eigen::Matrix3d RFLU2ENU = q.toRotationMatrix();
-        q = Eigen::Quaterniond(RFLU2ENU*R_FLU2FRD.transpose());
-        Eigen::Vector3d rpy = quat2eulers(q);
-        //Original rpy is ENU, we need NED rpy
-        fc_att_rpy = rpy;
-        yaw_fc = constrainAngle(rpy.z());
-#endif
     }
 
-#if FCHardware == DJI_SDK
-    void onFCAttitude(const geometry_msgs::QuaternionStamped & _quat) {
-        // geometry_msgs::Quaternion quat = _quat.quaternion;
-        // Eigen::Quaterniond q(quat.w, 
-            // quat.x, quat.y, quat.z);
-        // Eigen::Vector3d rpy = quat2eulers(q);
-
-        //Original rpy is FLU, we need NED rpy
-        // fc_att_rpy = rpy;
-        // yaw_fc = constrainAngle(-rpy.z() + M_PI/2);
-
-        // ROS_INFO("Yaw FC is %3.2f %3.2f", rpy.z(), yaw_fc);
-    }
-#else
     void onFCAttitude(const sensor_msgs::Imu & _imu) {
         geometry_msgs::Quaternion quat = _imu.orientation;
         auto q = ENU2NED(Eigen::Quaterniond(quat.w, quat.x, quat.y, quat.z));
@@ -313,7 +272,6 @@ public:
         // printf("NED Yaw %3.2f deg pitch %3.2f deg roll %3.2f deg\n", rpy.z()*180/M_PI, rpy.y()*180/M_PI, rpy.x()*180/M_PI);
         // printf("FC Raw Yaw %3.2f deg pitch %3.2f deg roll %3.2f deg\n", rpy_raw.z()*180/M_PI, rpy_raw.y()*180/M_PI, rpy_raw.x()*180/M_PI);
     }
-#endif
 
     void onFCAttitudeTarget(const mavros_msgs::AttitudeTarget atti_target) {
         auto quat = atti_target.orientation;
@@ -445,39 +403,6 @@ public:
 
 
     void set_drone_attitude_target(AttiCtrlOut atti_out, bool force_ignore_yaw=false) {
-#if FCHardware == DJI_SDK
-        //Use dji ros to set drone attitude target
-        sensor_msgs::Joy dji_command_so3; //! @note for dji ros wrapper
-        dji_command_so3.header.stamp    = ros::Time::now();
-        dji_command_so3.header.frame_id = std::string("FLU");
-        uint8_t flag;
-        if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_THRUST) {
-            flag = VERTICAL_THRUST | HORIZONTAL_ANGLE | YAW_ANGLE | HORIZONTAL_BODY | STABLE_DISABLE;
-        } else {
-            flag = VERTICAL_VELOCITY  | HORIZONTAL_ANGLE | YAW_ANGLE | HORIZONTAL_BODY | STABLE_DISABLE;
-        }
-
-        double yaw_sp =  atti_out.yaw_sp;
-        double roll_sp = atti_out.roll_sp;
-        double pitch_sp = atti_out.pitch_sp;
-        
-        if (!state.use_fc_yaw) {
-            yaw_sp = constrainAngle(yaw_sp + yaw_offset);
-        }
-        
-        dji_command_so3.axes.push_back(roll_sp);       // x
-        dji_command_so3.axes.push_back(pitch_sp);       // y
-        if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_THRUST) {
-            atti_out.thrust_sp = float_constrain(atti_out.thrust_sp, 0.02, thrust_limit);
-            dji_command_so3.axes.push_back(atti_out.thrust_sp*100); // z
-        } else {
-            dji_command_so3.axes.push_back(atti_out.thrust_sp); // z
-        }
-        dji_command_so3.axes.push_back(yaw_sp);       // w
-        dji_command_so3.axes.push_back(flag);
-
-        control_pub.publish(dji_command_so3);
-#else
         if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_THRUST) {
             mavros_msgs::AttitudeTarget att_target;
             att_target.header.stamp = ros::Time::now();
@@ -497,7 +422,7 @@ public:
             att_target.body_rate.z = 0; //yaw rate tmp to be zero
             att_target.thrust = float_constrain(atti_out.thrust_sp, 0.0, thrust_limit);
             control_pub.publish(att_target);
-            auto rpy = quat2eulers(atti_sp_out);
+            // auto rpy = quat2eulers(atti_sp_out);
             // printf("Real SP yaw %3.2f pitch %3.2f roll %3.2f\n", rpy.z()*57.3, rpy.y()*57.3, rpy.x()*57.3);
         } else if (atti_out.thrust_mode == AttiCtrlOut::THRUST_MODE_VELZ) {
             //Dummy input only
@@ -525,7 +450,6 @@ public:
             pos_target.acceleration_or_force.z = 0.0;
             control_pos_vel_px4_pub.publish(pos_target);
         }
-#endif
     }
 
     void send_dummy_atti_cmd() {
@@ -565,7 +489,7 @@ public:
         atti_out.thrust_mode = AttiCtrlOut::THRUST_MODE_THRUST;
         
         if (state.ctrl_mode < drone_pos_ctrl_cmd::CTRL_CMD_ATT_THRUST_MODE || 
-                (FCHardware == PX4 && state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_ATT_VELZ_MODE)) {
+                (state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_ATT_VELZ_MODE)) {
             if (state.ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_POS_MODE) {
                 vel_sp = pos_ctrl->control_pos(pos_sp, dt) + vel_ff;
                 vel_sp.x() = float_constrain(vel_sp.x(), -state.max_vel.x, state.max_vel.x);
@@ -673,6 +597,22 @@ public:
 
 };
 
+
+std::string generateLogPath(const std::string& folder_path) {
+    auto now = std::chrono::system_clock::now();
+    auto in_time_t = std::chrono::system_clock::to_time_t(now);
+    std::tm local_time;
+    
+    localtime_r(&in_time_t, &local_time);
+
+    std::ostringstream oss;
+    oss << folder_path << "/control"
+        << (local_time.tm_year + 1900) << '-'
+        << std::setw(2) << std::setfill('0') << (local_time.tm_mon + 1) << '-'
+        << std::setw(2) << std::setfill('0') << local_time.tm_mday
+        << ".csv";
+    return oss.str();
+}
 
 int main(int argc, char** argv)
 {

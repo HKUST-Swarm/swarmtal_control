@@ -18,5 +18,6 @@
         <arg name="vo_topic" value="$(arg vo_topic)"/>
         <arg name="config_path" value="$(arg config_path)"/>
         <arg name="output" default="screen" />
+        <arg name="log_path" value="$(arg log_path)"/>
     </include>
 </launch>
