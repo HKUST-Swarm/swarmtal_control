@@ -134,5 +134,16 @@ docker run -it --rm --privileged \
     buaaswarm/swarmtal_control launch
 ```
 
+## Save
+```bash
+docker save buaaswarm/swarmtal_control | gzip > swarmtal_control.tgz
+```
+
+## Load
+
+```bash
+gunzip -c swarmtal_control.tgz | docker load
+```
+
 ## License
 You can use this software freely. But if this crash your drone, no body will help you.
