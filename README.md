@@ -22,6 +22,17 @@ docker run -it --rm --privileged \
     buaaswarm/swarmtal_control
 ```
 
+or with your custom param.yaml (STONGLY RECOMMEND)
+```bash
+# Move drone_positon_control/launch/pos_control_param.yaml to $HOME/SwarmConfig/pos_control_param.yaml and modify it for your drone
+docker run -it --rm --privileged \
+    -v $HOME/output:/output/ -e FCU_URL="/dev/ttyTHS1:921600" \
+    -v $HOME/SwarmConfig/pos_control_param.yaml:/pos_control_param.yaml \
+    -e VO_TOPIC="/d2vins/imu_propagation" \
+    -e DRONE_ID=1 \
+    --name swarmtal_control \
+    buaaswarm/swarmtal_control
+
 Change the FCU_URL, VO_TOPIC, DRONE_ID and $HOME/output to what you want
 
 The only interface is sending message to topic "/drone_commander/onboard_command".
