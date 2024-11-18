@@ -1,7 +1,6 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 # -*- coding: UTF-8 -*-
 import numpy as np
-import matplotlib.pyplot as plt
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import sys
@@ -57,6 +56,7 @@ def parse_csv_data(csv_path, lt=0, rt=1000000):
 
 def anaylze_csv(dataname, l=0, r=100000, plot=True):
     csv_data = parse_csv_data(dataname, l, r)
+    print(f"Data shape: {csv_data['pos'].shape}")
     
     def maskps(data):
         return np.ma.masked_where(csv_data["ctrl_mode"] != 2, data)
@@ -272,6 +272,7 @@ def anaylze_csv(dataname, l=0, r=100000, plot=True):
     
 
 if __name__=="__main__":
+    print("Usage: python3 swarmtal_csv_parser.py csv_path [l] [r]")
     if len(sys.argv)> 1:
         l = 0
         r = 1000000
@@ -280,5 +281,6 @@ if __name__=="__main__":
 
         if len(sys.argv) > 3:
             r = float(sys.argv[3])
-
+        print(f"Parse {sys.argv[1]} from {l} to {r}")
         cd = anaylze_csv(sys.argv[1], l, r, plot=True)
+        plt.show()

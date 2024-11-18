@@ -1,4 +1,4 @@
-FROM --platform=linux/arm64 ros:noetic-perception-focal
+FROM ros:noetic-perception-focal
 
 ARG ROS_VERSION=noetic
 ARG SWARM_WS=/root/swarm_ws
@@ -8,7 +8,8 @@ ENV VO_TOPIC=/d2vins/imu_propagation
 ENV DRONE_ID=1
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y git ros-${ROS_VERSION}-mavros ros-${ROS_VERSION}-mavros-extras ros-${ROS_VERSION}-mavros-msgs vim wget screen libglib2.0-dev 
+RUN apt-get update && apt-get install -y git ros-${ROS_VERSION}-mavros ros-${ROS_VERSION}-mavros-extras ros-${ROS_VERSION}-mavros-msgs \
+      vim wget screen libglib2.0-dev python3-termcolor python3-matplotlib
 RUN wget https://raw.githubusercontent.com/mavlink/mavros/master/mavros/scripts/install_geographiclib_datasets.sh
 RUN chmod +x install_geographiclib_datasets.sh
 RUN ./install_geographiclib_datasets.sh

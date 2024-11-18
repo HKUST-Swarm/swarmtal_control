@@ -10,7 +10,10 @@ help:
 	@echo ""
 
 arm64:
-	@docker build  -t buaaswarm/swarmtal_control -f ./Dockerfile .
+	@docker build --platform=linux/arm64 -t buaaswarm/swarmtal_control -f ./Dockerfile .
+
+pc:
+	@docker build  --platform=linux/amd64 -t buaaswarm/swarmtal_control -f ./Dockerfile .
 
 clean:
 	@docker rmi -f buaaswarm/swarmtal_control

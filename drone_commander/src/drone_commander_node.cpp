@@ -1,8 +1,3 @@
-#define PX4 0 
-#define DJI_SDK 1
-// #define FCHardware DJI_SDK
-#define FCHardware PX4
-
 #include <ros/ros.h>
 #include <swarmtal_msgs/drone_pos_ctrl_cmd.h>
 #include <swarmtal_msgs/drone_onboard_command.h>
@@ -14,12 +9,6 @@
 #include <sensor_msgs/BatteryState.h>
 #include <sensor_msgs/Imu.h>
 
-#if FCHardware == DJI_SDK
-#include <dji_sdk/ControlDevice.h>
-#include <dji_sdk/SDKControlAuthority.h>
-#include <dji_sdk/DroneArmControl.h>
-#include <dji_sdk/DroneTaskControl.h>
-#else 
 #include <mavros_msgs/CommandBool.h>
 #include <mavros_msgs/CommandTOL.h>
 #include <mavros_msgs/CommandLong.h>
@@ -30,7 +19,6 @@
 #include <mavros_msgs/AttitudeTarget.h>
 #include <mavros_msgs/RCIn.h>
 #include <mavros_msgs/CompanionProcessStatus.h>
-#endif
 
 #include <geometry_msgs/Vector3.h>
 #include <geometry_msgs/QuaternionStamped.h>
@@ -41,13 +29,9 @@ using namespace swarmtal_msgs;
 using namespace Eigen;
 
 // #define MAX_VO_LATENCY 0.5f
-#if FCHardware == DJI_SDK
-#define MAX_LOSS_RC 0.3f
-#define MAX_LOSS_SDK 0.1f
-#else
 #define MAX_LOSS_RC 1.0f
 #define MAX_LOSS_SDK 1.0f
-#endif
+
 #define MAX_ODOM_VELOCITY 25.0f
 
 #define RC_DEADZONE_RPY 0.1
@@ -216,18 +200,14 @@ class DroneCommander {
     bool pos_sp_inited = false;
     bool is_px4 = false;
 
-#if FCHardware == PX4
     mavros_msgs::State px4_fcu_state;
-#endif
     Eigen::Matrix3d R_ENU2NED;
     Eigen::Matrix3d R_FLU2FRD; 
 public:
     DroneCommander(ros::NodeHandle & _nh): nh(_nh) {
         R_ENU2NED << 0, 1, 0, 1, 0, 0, 0, 0, -1;
         R_FLU2FRD << 1, 0, 0, 0, -1, 0, 0, 0, -1;
-#if FCHardware == PX4
         is_px4 = true;
-#endif
         init_states();
         init_subscribes();
 
@@ -288,9 +268,6 @@ protected:
     void rc_mavros_callback(const mavros_msgs::RCIn & _rc);
     void flight_status_callback(const std_msgs::UInt8 & _flight_status);
     void onboard_cmd_callback(const drone_onboard_command & _cmd);
-#if FCHardware == DJI_SDK
-    void ctrl_dev_callback(const dji_sdk::ControlDevice & _ctrl_dev);
-#endif
     void fc_attitude_callback(const geometry_msgs::QuaternionStamped & _quat);
     void loop(const ros::TimerEvent & _e);
     void battery_callback(const sensor_msgs::BatteryState & _bat);
@@ -369,24 +346,10 @@ protected:
 
 
 void DroneCommander::setupFCControl() {
-#if FCHardware == DJI_SDK
-    rc_sub = nh.subscribe("rc", 1, &DroneCommander::rc_callback, this, ros::TransportHints().tcpNoDelay());
-#else
     rc_sub = nh.subscribe("rc", 1, &DroneCommander::rc_mavros_callback, this, ros::TransportHints().tcpNoDelay());
-#endif
     bat_sub = nh.subscribe("battery", 1, &DroneCommander::battery_callback, this,  ros::TransportHints().tcpNoDelay());
     imu_data_sub = nh.subscribe("fc_imu", 1, &DroneCommander::on_imu_data, this, ros::TransportHints().tcpNoDelay());
     imu_fused_data_sub = nh.subscribe("fc_imu_fused", 1, &DroneCommander::on_imu_data_fused, this, ros::TransportHints().tcpNoDelay());
-#if FCHardware == DJI_SDK
-    fc_att_sub = nh.subscribe("fc_attitude", 1, &DroneCommander::fc_attitude_callback, this, ros::TransportHints().tcpNoDelay());
-    flight_status_sub = nh.subscribe("flight_status", 1, &DroneCommander::flight_status_callback, this, ros::TransportHints().tcpNoDelay());
-    ctrl_dev_sub = nh.subscribe("control_device", 1, &DroneCommander::ctrl_dev_callback, this, ros::TransportHints().tcpNoDelay());
-    control_auth_client = nh.serviceClient<dji_sdk::SDKControlAuthority>("sdk_control_authority");
-    drone_task_control = nh.serviceClient<dji_sdk::DroneTaskControl>("sdk_task_control");
-    ROS_INFO("Waiting for services");
-    control_auth_client.waitForExistence();
-    ROS_INFO("Services ready");
-#else
     control_auth_client = nh.serviceClient<mavros_msgs::SetMode>("/mavros/set_mode");
     ROS_INFO("Waiting for PX4 services.....");
     control_auth_client.waitForExistence();
@@ -399,7 +362,6 @@ void DroneCommander::setupFCControl() {
     mavros_odom_pub = nh.advertise<nav_msgs::Odometry>("/mavros/odometry/out", 10);
     fc_state_sub = nh.subscribe("/mavros/state", 10, &DroneCommander::fc_state_callback, this, ros::TransportHints().tcpNoDelay());
     fc_extened_state_sub = nh.subscribe("/mavros/extended_state", 10, &DroneCommander::fc_extended_state_callback, this, ros::TransportHints().tcpNoDelay());
-#endif
 }
 
 void DroneCommander::loop(const ros::TimerEvent & _e) {
@@ -486,26 +448,12 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
 }
 
 bool DroneCommander::callArmService(bool arm) {
-#if FCHardware == DJI_SDK
-    dji_sdk::DroneArmControl arm_srv;
-    arm_srv.request.arm = arm;
-    ros::service::call("/dji_sdk_1/dji_sdk/drone_arm_control", arm_srv);
-    ROS_INFO("Try arm/disarm success %d", arm_srv.response.result);
-    return arm_srv.response.result;
-#else 
-    //     mavros_msgs::CommandLong cmd_long;
-    //     cmd_long.request.command = 400;
-    //     cmd_long.request.param2 = 21196;
-    //     ros::service::call("/mavros/cmd/command", cmd_long);
-    //     ROS_INFO("Try kill %d success %d", cmd_long.response.success);
-    //     return cmd_long.response.success;
     mavros_msgs::CommandBool arm_cmd;
     arm_cmd.request.value = arm;
     ros::service::call("/mavros/cmd/arming", arm_cmd);
     ROS_INFO("Try arm %d success %d", arm, arm_cmd.response.success);
     return arm_cmd.response.success;
     return false;
-#endif
 }
 
 void DroneCommander::try_arm(bool arm) {
@@ -539,17 +487,6 @@ void DroneCommander::try_arm(bool arm) {
 }
 
 void DroneCommander::try_control_auth(bool auth) {
-#if FCHardware == DJI_SDK
-    dji_sdk::SDKControlAuthority srv;
-    srv.request.control_enable = auth;
-    if (control_auth_client.call(srv))
-    {
-        ROS_INFO("Require control auth %d, res %d", auth, srv.response.ack_data);
-        state.control_auth = srv.response.ack_data;
-    } else {
-        ROS_ERROR("Failed to call service control auth");
-    }
-#else
     if (!state.is_armed) {
         //May auth only when armed.
         return;
@@ -563,7 +500,6 @@ void DroneCommander::try_control_auth(bool auth) {
     if (control_auth_client.call(offb_set_mode) && offb_set_mode.response.mode_sent) {
         ROS_INFO("Offboard enable failed");
     }
-#endif
 }
 
 bool DroneCommander::nead_control_by_this() {
@@ -986,35 +922,19 @@ void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
 
 
 bool DroneCommander::rc_request_onboard() {
-#if FCHardware == DJI_SDK
-    return (rc.axes[4] > 8000 && rc.axes[5] < -8000);
-#else
     return (rc.axes[6] > 1800 && rc.axes[7] > 1800);
-#endif
 }
 
 bool DroneCommander::rc_request_vo() {
-#if FCHardware == DJI_SDK
-    //DJI is -10000 to 10000
-    return (rc.axes[4] > 8000);
-#else
     //PX4 is 1000 to 2000
     return (rc.axes[6] > 1800);
-#endif
 }
 
 bool DroneCommander::rc_moving_stick () {
-#if FCHardware == DJI_SDK
-    bool if_move =  fabs(rc.axes[0]) > RC_DEADZONE_RPY;
-    if_move = if_move || fabs(rc.axes[1]) > RC_DEADZONE_RPY;
-    if_move = if_move || fabs(rc.axes[2]) > RC_DEADZONE_RPY;
-    if_move = if_move || fabs(rc.axes[3]) > RC_DEADZONE_THRUST;
-#else
     bool if_move =  fabs(rc.axes[0] - PWM_CENTER) > PWM_DEADZONE_RPY;
     if_move = if_move || fabs(rc.axes[1] - PWM_CENTER) > PWM_DEADZONE_RPY;
     if_move = if_move || fabs(rc.axes[3] - PWM_CENTER) > PWM_DEADZONE_RPY;
     if_move = if_move || fabs(rc.axes[2] - PWM_CENTER) > PWM_DEADZONE_THR;
-#endif
     return if_move;
 }
 
@@ -1103,17 +1023,10 @@ void DroneCommander::process_rc_input () {
     double z = 0;
 
     if (state.rc_valid) {
-#if FCHardware == DJI_SDK
-        y = - superexpo(rc.axes[0]) ;
-        x = superexpo(rc.axes[1]);
-        r = superexpo(rc.axes[2]);
-        z = superexpo(rc.axes[3]);
-#else
         y = - superexpo((rc.axes[0] - PWM_CENTER)/PWM_100);
         x = superexpo((rc.axes[1] - PWM_CENTER)/PWM_100);
         z = superexpo((rc.axes[2] - PWM_CENTER)/PWM_100);
         r = superexpo((rc.axes[3] - PWM_CENTER)/PWM_100);
-#endif
     }
 
 
@@ -1208,7 +1121,7 @@ void DroneCommander::process_onboard_input () {
 void DroneCommander::process_control() {
     //control_count ++;
     if (state.control_auth != DCMD::CTRL_AUTH_THIS) {
-        if (state.commander_ctrl_mode == DCMD::CTRL_MODE_TAKEOFF && FCHardware == PX4) {
+        if (state.commander_ctrl_mode == DCMD::CTRL_MODE_TAKEOFF) {
             process_control_takeoff();
         } else {
             state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
@@ -1274,14 +1187,6 @@ void DroneCommander::process_control_takeoff() {
     bool is_in_air = state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR;
     bool is_takeoff_finish = false;
     auto pos = odometry.pose.pose.position;
-#if FCHardware == DJI_SDK
-    if (state.control_auth != DCMD::CTRL_AUTH_THIS) {
-        //Abort takeoff
-        takeoff_inited = false;
-        request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
-        return;
-    }
-#endif
     if (!state.vo_valid) {
         takeoff_inited = false;
         request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
@@ -1351,18 +1256,6 @@ void DroneCommander::process_control_takeoff() {
 }
 
 bool DroneCommander::request_drone_landing() {
-#if FCHardware == DJI_SDK
-    dji_sdk::DroneTaskControl srv;
-    srv.request.task = dji_sdk::DroneTaskControlRequest::TASK_LAND;
-    if (drone_task_control.call(srv)) {
-        if (srv.response.result) {
-            ROS_INFO("Using DJI Landing success....");
-            // request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
-            in_fc_landing = true;
-            return true;
-        }
-    }
-#else
     mavros_msgs::CommandTOL srv;
     srv.request.altitude = 0;
     srv.request.latitude = 0;
@@ -1375,7 +1268,6 @@ bool DroneCommander::request_drone_landing() {
             return true;
         }
     }
-#endif
     return false;
 }
 
@@ -1703,45 +1595,8 @@ bool DroneCommander::is_odom_valid(const nav_msgs::Odometry & _odom) {
 }
 
 bool DroneCommander::is_rc_valid(const sensor_msgs::Joy & _rc) {
-#if FCHardware == PX4
     return px4_fcu_state.manual_input;
-#else
-    //TODO: Test rc vaild function,
-    // This only works for SBUS!!!!
-    if (!rc_fail_detection) {
-        return true;
-    }
-    if (
-        _rc.axes[0] == 0 && 
-        _rc.axes[1] == 0 && 
-        _rc.axes[2] == 0 && 
-        _rc.axes[3] == 0
-    ) {
-        return false;
-    }
-    return true;
-#endif
 }
-
-#if FCHardware == DJI_SDK
-void DroneCommander::ctrl_dev_callback(const dji_sdk::ControlDevice & _ctrl_dev) {
-    //RC 0
-    //App 1
-    //SDK 2
-    if (_ctrl_dev.controlDevice == 2) {
-        state.control_auth = DCMD::CTRL_AUTH_THIS;
-    }
-
-    if (_ctrl_dev.controlDevice == 1) {
-        state.control_auth = DCMD::CTRL_AUTH_APP;
-    }
-
-    if (_ctrl_dev.controlDevice == 0) {
-        state.control_auth = DCMD::CTRL_AUTH_RC;
-    }
-
-}
-#endif
 
 void DroneCommander::reset_yaw_sp() {
     if (state.djisdk_valid) {

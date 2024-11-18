@@ -12,28 +12,66 @@ make arm64
 
 ### Launch
 
-Launch mavros with drone_commander, drone_position_control and swarm_pilot:
+Launch mavros with drone_commander, drone_position_control and swarm_pilot, change the FCU_URL, VO_TOPIC, DRONE_ID and $HOME/output to what you want.
+
 ```bash
 docker run -it --rm --privileged \
     -v $HOME/output:/output/ -e FCU_URL="/dev/ttyTHS1:921600" \
+    -v "/tmp/.X11-unix:/tmp/.X11-unix:rw" \
     -e VO_TOPIC="/d2vins/imu_propagation" \
     -e DRONE_ID=1 \
+    -e DISPLAY=$DISPLAY \
     --name swarmtal_control \
-    buaaswarm/swarmtal_control
+    buaaswarm/swarmtal_control launch
 ```
 
-or with your custom param.yaml (STONGLY RECOMMEND)
+To verify: 
+
 ```bash
-# Move drone_positon_control/launch/pos_control_param.yaml to $HOME/SwarmConfig/pos_control_param.yaml and modify it for your drone
+docker exec -it swarmtal_control /entrypoint.sh status 
+```
+
+Now you should see the battery voltage
+
+```bash
+[54.614s] VO False :[0.000, 0.000, 0.000] BAT: |----------|  0.0% :0.00V
+```
+
+To work with your custom control parameters (STONGLY RECOMMEND)
+Move drone_positon_control/launch/pos_control_param.yaml to $HOME/SwarmConfig/pos_control_param.yaml and modify it for your own drone
+
+```bash
 docker run -it --rm --privileged \
     -v $HOME/output:/output/ -e FCU_URL="/dev/ttyTHS1:921600" \
     -v $HOME/SwarmConfig/pos_control_param.yaml:/pos_control_param.yaml \
+    -v "/tmp/.X11-unix:/tmp/.X11-unix:rw" \
     -e VO_TOPIC="/d2vins/imu_propagation" \
     -e DRONE_ID=1 \
+    -e DISPLAY=$DISPLAY \
     --name swarmtal_control \
-    buaaswarm/swarmtal_control
+    buaaswarm/swarmtal_control launch
+```
 
-Change the FCU_URL, VO_TOPIC, DRONE_ID and $HOME/output to what you want
+### Testing
+First thing you may want to do is visualize its status
+
+```bash
+docker exec -it swarmtal_control /entrypoint.sh status 
+```
+
+Of-course, try to arm and control it, simply by sending command to drone_commander by command:
+
+```bash
+docker exec -it swarmtal_control /entrypoint.sh cmd [arm,takeoff,landing,....]
+```
+
+And to visualize log file
+
+```bash
+docker exec -it swarmtal_control /entrypoint.sh plot /output/name-of-log-file.csv
+```
+
+## Interface
 
 The only interface is sending message to topic "/drone_commander/onboard_command".
 
@@ -79,6 +117,21 @@ int32 param8
 int32 param9
 int32 param10
 
+```
+
+## Debugging
+If you want to change some scripts or entrypoints
+
+```bash
+docker run -it --rm --privileged \
+    -v $HOME/output:/output/ -e FCU_URL="/dev/ttyTHS1:921600" \
+    -v ./:/root/swarm_ws/src/ \
+    -v "/tmp/.X11-unix:/tmp/.X11-unix:rw" \
+    -e VO_TOPIC="/d2vins/imu_propagation" \
+    -e DRONE_ID=1 \
+    -e DISPLAY=$DISPLAY \
+    --name swarmtal_control \
+    buaaswarm/swarmtal_control launch
 ```
 
 ## License
