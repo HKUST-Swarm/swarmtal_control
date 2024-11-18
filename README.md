@@ -4,6 +4,26 @@ This is a control package for DJI N3/PX4(in progress) high level position contro
 It also provide some system iden function with combintation of my other great repo https://github.com/xuhao1/pyaircraftiden.
 
 ## Usage
+### Build
+Build for docker
+```bash
+make arm64
+```
+
+### Launch
+
+Launch mavros with drone_commander, drone_position_control and swarm_pilot:
+```bash
+docker run -it --rm --privileged \
+    -v $HOME/output:/output/ -e FCU_URL="/dev/ttyTHS1:921600" \
+    -e VO_TOPIC="/d2vins/imu_propagation" \
+    -e DRONE_ID=1 \
+    --name swarmtal_control \
+    buaaswarm/swarmtal_control
+```
+
+Change the FCU_URL, VO_TOPIC, DRONE_ID and $HOME/output to what you want
+
 The only interface is sending message to topic "/drone_commander/onboard_command".
 
 drone_cmd.py provide a great example for usage including takeoff, flyto somewhere landing and also do a sweep frequency experiment.

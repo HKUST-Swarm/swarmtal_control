@@ -1,0 +1,14 @@
+<launch>
+    <arg name="drone_id" default="1" />
+    <arg name="output" default="screen" />
+    <arg name="debug" default="false" />
+    <arg name="send_drone_status_freq" default="10" />
+    <arg name="enable_planner" default="false" />
+    <node pkg="swarm_pilot" name="swarm_pilot" type="swarm_pilot_node" output="$(arg output)" >
+        <param name="drone_id" value="$(arg drone_id)" />
+        <param name="Ts" value="0.1" />
+        <param name="planning_debug_mode" value="$(arg debug)" />
+        <param name="enable_planner" value="$(arg enable_planner)" />
+        <param name="send_drone_status_freq" value="$(arg send_drone_status_freq)" />
+    </node>
+</launch>
