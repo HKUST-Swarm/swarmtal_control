@@ -41,11 +41,12 @@ To work with your custom control parameters (STONGLY RECOMMEND)
 Move drone_positon_control/launch/pos_control_param.yaml to $HOME/SwarmConfig/pos_control_param.yaml and modify it for your own drone
 
 ```bash
-docker run -it --rm --privileged \
+docker run -it --rm --privileged --net=host \
     -v $HOME/output:/output/ -e FCU_URL="/dev/ttyTHS1:921600" \
-    -v $HOME/SwarmConfig/pos_control_param.yaml:/pos_control_param.yaml \
     -v "/tmp/.X11-unix:/tmp/.X11-unix:rw" \
-    -e VO_TOPIC="/d2vins/imu_propagation" \
+    -v /home/nvidia/SwarmConfig/pos_control_param.yaml:/pos_control_param.yaml \
+    -e VO_TOPIC="/Odometry" \
+    -e VO_IMU_TOPIC="/d2vins/imu_propagation" \
     -e DRONE_ID=1 \
     -e DISPLAY=$DISPLAY \
     --name swarmtal_control \

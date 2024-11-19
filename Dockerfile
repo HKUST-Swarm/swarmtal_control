@@ -4,7 +4,8 @@ ARG ROS_VERSION=noetic
 ARG SWARM_WS=/root/swarm_ws
 
 ENV FCU_URL=/dev/ttyTHS1:921600
-ENV VO_TOPIC=/d2vins/imu_propagation
+ENV VO_TOPIC=/d2vins/odometry
+ENV VO_IMU_TOPIC=/d2vins/imu_propagation
 ENV DRONE_ID=1
 
 ENV DEBIAN_FRONTEND=noninteractive
