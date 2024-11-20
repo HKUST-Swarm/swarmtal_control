@@ -7,6 +7,8 @@ if [ "$1" == "launch" ]; then
     echo "Starting MAVROS on $FCU_URL, please set the FCU_URL in environment on docker, e.g. /dev/ttyUSB0:921600"
     nice --20 roslaunch mavros px4.launch fcu_url:=$FCU_URL &
     sleep 5
+    echo "Launching UWB node"
+    roslaunch inf_uwb_ros uwb_node_expo.launch self_id:=$DRONE_ID serial_name:=$UWB_PORT &
     echo "Starting swarmtal_control on $VO_TOPIC & $VO_IMU_TOPIC, please set the VO_TOPIC in environment, e.g. /d2vins/imu_propagation"
     nice --20 roslaunch drone_commander commander-px4.launch vo_topic:=$VO_TOPIC vo_imu_topic:=$VO_IMU_TOPIC \
         config_path:=/pos_control_param.yaml log_path:=/output/ &

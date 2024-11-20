@@ -4,6 +4,7 @@ ARG ROS_VERSION=noetic
 ARG SWARM_WS=/root/swarm_ws
 
 ENV FCU_URL=/dev/ttyTHS1:921600
+ENV UWB_PORT=/dev/ttyTHS2
 ENV VO_TOPIC=/d2vins/odometry
 ENV VO_IMU_TOPIC=/d2vins/imu_propagation
 ENV DRONE_ID=1
@@ -27,7 +28,8 @@ RUN   git clone https://github.com/lcm-proj/lcm && \
 RUN   mkdir -p ${SWARM_WS}/src/ && \
       cd ${SWARM_WS}/src/ && \
       git clone https://github.com/HKUST-Swarm/swarm_msgs.git -b D2SLAM && \
-      git clone https://github.com/HKUST-Swarm/bspline
+      git clone https://github.com/HKUST-Swarm/bspline && \
+      git clone https://github.com/HKUST-Swarm/inf_uwb_ros.git
 COPY ./ ${SWARM_WS}/src/
 WORKDIR $SWARM_WS
 SHELL ["/bin/bash", "-c"]
