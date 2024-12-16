@@ -23,9 +23,8 @@ else if [ "$1" == "launch_sitl" ]; then
     done
     echo "Launching UWB node"
     roslaunch inf_uwb_ros uwb_node_expo.launch self_id:=$DRONE_ID serial_name:=$UWB_PORT &
-    sleep 5
     echo "Starting swarmtal_control on $VO_TOPIC & $VO_IMU_TOPIC, please set the VO_TOPIC in environment, e.g. /d2vins/imu_propagation"
-    roslaunch drone_commander commander-px4.launch vo_topic:=$VO_TOPIC vo_imu_topic:=$VO_IMU_TOPIC \
+    roslaunch drone_commander commander-px4-sim.launch vo_topic:=$VO_TOPIC vo_imu_topic:=$VO_IMU_TOPIC \
         config_path:=/pos_control_param.yaml log_path:=/output/ &
     echo "Starting swarm_pilot with drone_id: $DRONE_ID"
     roslaunch swarm_pilot swarm_pilot.launch drone_id:=$DRONE_ID

@@ -402,7 +402,7 @@ void DroneCommander::loop(const ros::TimerEvent & _e) {
         //     rc.axes[4],
         //     rc.axes[5]
         // );
-        printf("POS %3.2f %3.2f %3.2f TGT %3.2f %3.2f %3.2f\nctrl_input_state %d, flight_status %d\nstate.control_auth %d  ctrl_mode %d, is_armed %d in air %d\n rc_valid %d onboard_cmd_valid %d vo_valid%d sdk_valid %d\n",
+        printf("P[%3.2f,%3.2f,%3.2f] TGT [%3.2f,%3.2f, %3.2f]\nctrl_input_state %d, flight_status %d ctrl_auth %d  ctrl_mode %d armed %d in_air %d rc_valid %d onboard_cmd %d vo_valid %d sdk_valid %d\n",
     	    odometry.pose.pose.position.x,
 	        odometry.pose.pose.position.y,
 	        odometry.pose.pose.position.z,
@@ -931,6 +931,10 @@ bool DroneCommander::rc_request_vo() {
 }
 
 bool DroneCommander::rc_moving_stick () {
+    if (!state.rc_valid)
+    {
+        return false;
+    }
     bool if_move =  fabs(rc.axes[0] - PWM_CENTER) > PWM_DEADZONE_RPY;
     if_move = if_move || fabs(rc.axes[1] - PWM_CENTER) > PWM_DEADZONE_RPY;
     if_move = if_move || fabs(rc.axes[3] - PWM_CENTER) > PWM_DEADZONE_RPY;

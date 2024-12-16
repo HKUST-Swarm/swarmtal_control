@@ -798,7 +798,6 @@ void SwarmPilot::on_drone_commander_state(const drone_commander_state & _state) 
                 _state.commander_ctrl_mode, _state.ctrl_input_state, _state.rc_valid, _state.onboard_cmd_valid, _state.djisdk_valid,
                 _state.vo_valid,_state.vo_latency, _state.bat_vol, _state.bat_remain, _state.pos.x, _state.pos.y, _state.pos.z, _state.yaw);
         // ROS_INFO_THROTTLE(1.0, "[SWAMR_PILOT] Sending swarm status");
-        ROS_INFO("[SWAMR_PILOT] Sending swarm status");
         send_mavlink_message(msg);
     }
 

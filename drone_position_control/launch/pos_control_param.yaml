@@ -35,6 +35,6 @@ pid_param:
 
     thr:
         level_thrust: 0.5
-        thrust_limit: 0.2
+        thrust_limit: 0.9
 
 landing_thrust: 0.03
