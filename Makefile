@@ -21,7 +21,7 @@ sitl:
 clean:
 	@docker rmi -f swarmtal_control
 
-upload: upload_arm64, upload_amd64
+upload: upload_arm64; upload_amd64
 
 upload_arm64: arm64
 	@docker tag swarmtal_control:arm64 buaadocker.xuhao1.me/swarmtal_control:arm64
