@@ -15,12 +15,12 @@
         <rosparam command="load" file="$(arg config_path)" />
         <param name="max_vo_latency" value="1.0" />
     </node>
-    <include file="$(find drone_position_control)/launch/pos_control-px4.launch">
+    <!-- <include file="$(find drone_position_control)/launch/pos_control-px4.launch">
         <arg name="vo_topic" value="$(arg vo_imu_topic)"/>
         <arg name="config_path" value="$(arg config_path)"/>
         <arg name="output" default="screen" />
         <arg name="log_path" value="$(arg log_path)"/>
-    </include>
+    </include> -->
 
     <node pkg="drone_commander" type="px4_odom_converter.py" name="odom_transformer" output="screen">
         <remap from="~odom_in" to="/mavros/odometry/in"/>

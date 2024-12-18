@@ -21,6 +21,7 @@ def odometry_callback(msg):
 
     modified_odom = Odometry()
     modified_odom.header = msg.header
+    modified_odom.header.frame_id = "world"
     
     modified_odom.pose.pose.position.x = modified_position[0]
     modified_odom.pose.pose.position.y = modified_position[1]
