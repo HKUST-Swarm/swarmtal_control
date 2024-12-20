@@ -13,10 +13,7 @@ arm64:
 	@docker build --platform=linux/arm64 -t buaadocker.xuhao1.me/swarmtal_control:arm64 -f ./Dockerfile .
 
 pc:
-	@docker build  --platform=linux/amd64 -t buaadocker.xuhao1.me/swarmtal_control:amd64 -f ./Dockerfile .
-
-sitl:
-	@docker build  --platform=linux/amd64 -t buaadocker.xuhao1.me/swarmtal_control_sitl:amd64 -f ./Dockerfile.SITL .
+	@docker build --pull=false --platform=linux/amd64 -t buaadocker.xuhao1.me/swarmtal_control:amd64 -f ./Dockerfile .
 
 clean:
 	@docker rmi -f swarmtal_control
@@ -27,6 +24,5 @@ upload_arm64: arm64
 	@docker tag swarmtal_control:arm64 buaadocker.xuhao1.me/swarmtal_control:arm64
 	@docker push buaadocker.xuhao1.me/swarmtal_control:arm64
 
-upload_amd64: pc; sitl
+upload_amd64: pc
 	@docker push buaadocker.xuhao1.me/swarmtal_control:amd64
-	@docker push buaadocker.xuhao1.me/swarmtal_control_sitl:amd64
