@@ -4,6 +4,7 @@
 source /root/swarm_ws/devel/setup.bash
 echo "Launching with argument $1"
 if [ "$1" == "launch" ]; then
+    sudo route add -net 224.0.0.0 netmask 240.0.0.0 dev eth0
     echo "Starting MAVROS on $FCU_URL, please set the FCU_URL in environment on docker, e.g. /dev/ttyUSB0:921600"
     nice --20 roslaunch mavros px4.launch fcu_url:=$FCU_URL &
     sleep 5
