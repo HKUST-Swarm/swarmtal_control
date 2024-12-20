@@ -14,7 +14,7 @@ if [ "$1" == "launch" ]; then
     nice --20 roslaunch drone_commander commander-px4.launch vo_topic:=$VO_TOPIC vo_imu_topic:=$VO_IMU_TOPIC \
         config_path:=/pos_control_param.yaml log_path:=/output/ &
     echo "Starting swarm_pilot with drone_id: $DRONE_ID"
-    roslaunch swarm_pilot swarm_pilot.launch drone_id:=$DRONE_ID
+    roslaunch swarm_pilot swarm_pilot.launch drone_id:=$DRONE_ID enable_planner:=$ENABLE_PLANNER
     echo "PX4 and swarmtal_control started"
 else if [ "$1" == "launch_sitl" ]; then
     echo "Checking if roscore is ready..."
@@ -28,7 +28,7 @@ else if [ "$1" == "launch_sitl" ]; then
     roslaunch drone_commander commander-px4-sim.launch vo_topic:=$VO_TOPIC vo_imu_topic:=$VO_IMU_TOPIC \
         config_path:=/pos_control_param.yaml log_path:=/output/ &
     echo "Starting swarm_pilot with drone_id: $DRONE_ID"
-    roslaunch swarm_pilot swarm_pilot.launch drone_id:=$DRONE_ID
+    roslaunch swarm_pilot swarm_pilot.launch drone_id:=$DRONE_ID enable_planner:=$ENABLE_PLANNER
     echo "PX4 and swarmtal_control started"
 else if [ "$1" == "cmd" ]; then
     # rosrun with all remaining arguments
