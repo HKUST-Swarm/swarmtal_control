@@ -3,7 +3,7 @@
 from __future__ import print_function
 import argparse
 import rospy
-from swarmtal_msgs.msg import drone_onboard_command
+from swarmtal_msgs.msg import DroneOnboardCommand
 import sys
 import math
 import numpy as np

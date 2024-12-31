@@ -2,13 +2,13 @@
 
 import argparse
 import rospy
-from swarmtal_msgs.msg import drone_onboard_command
+from swarmtal_msgs.msg import DroneOnboardCommand
 import sys
 import math
 import numpy as np
 
 def send(cmd, args, pub):
-    # pub = rospy.Publisher("/drone_commander/onboard_command", drone_onboard_command, queue_size=1)
+    # pub = rospy.Publisher("/drone_commander/onboard_command", DroneOnboardCommand, queue_size=1)
     pub.publish(cmd)
 
 
@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
 
     print("Sending to onboard")
-    pub = rospy.Publisher("/drone_commander/onboard_command", drone_onboard_command, queue_size=1)
+    pub = rospy.Publisher("/drone_commander/onboard_command", DroneOnboardCommand, queue_size=1)
 
 
     rate = rospy.Rate(50)  # 20hz
@@ -52,7 +52,7 @@ if __name__ == "__main__":
         if connections > 0:
             break
         rate.sleep()
-    cmd = drone_onboard_command()
+    cmd = DroneOnboardCommand()
 
     if args.command_type == "takeoff":
         if len(args.params) < 1:
@@ -60,37 +60,37 @@ if __name__ == "__main__":
             height = 1.0
         else:
             height = args.params[0]
-        cmd.command_type = drone_onboard_command.CTRL_TAKEOF_COMMAND
+        cmd.command_type = DroneOnboardCommand.CTRL_TAKEOF_COMMAND
         cmd.param1 = int(height*10000)
         cmd.param2 = 5000 # 0.5m/s
         send(cmd, args, pub)
 
     elif args.command_type == "landing":
-        cmd.command_type = drone_onboard_command.CTRL_LANDING_COMMAND
+        cmd.command_type = DroneOnboardCommand.CTRL_LANDING_COMMAND
         cmd.param1 = 0
         cmd.param2 = 3000
         send(cmd, args, pub)
 
     elif args.command_type == "emland":
-        cmd.command_type = drone_onboard_command.CTRL_LANDING_COMMAND
+        cmd.command_type = DroneOnboardCommand.CTRL_LANDING_COMMAND
         cmd.param1 = 1
         cmd.param2 = 10000
         send(cmd, args, pub)
 
     elif args.command_type == "arm":
-        cmd.command_type = drone_onboard_command.CTRL_ARM_COMMAND
+        cmd.command_type = DroneOnboardCommand.CTRL_ARM_COMMAND
         cmd.param1 = 1
         send(cmd, args, pub)
 
 
     elif args.command_type == "disarm":
-        cmd.command_type = drone_onboard_command.CTRL_ARM_COMMAND
+        cmd.command_type = DroneOnboardCommand.CTRL_ARM_COMMAND
         cmd.param1 = 0
         send(cmd, args, pub)
 
 
     elif args.command_type == "flyto":
-        cmd.command_type = drone_onboard_command.CTRL_POS_COMMAND
+        cmd.command_type = DroneOnboardCommand.CTRL_POS_COMMAND
         if len(args.params) < 3:
             rospy.logerr("Must give xyz when using flyto")
             sys.exit(-1)
@@ -117,7 +117,7 @@ if __name__ == "__main__":
                 exit(0)
     
     elif args.command_type == "vel":
-        cmd.command_type = drone_onboard_command.CTRL_VEL_COMMAND
+        cmd.command_type = DroneOnboardCommand.CTRL_VEL_COMMAND
         if len(args.params) < 3:
             rospy.logerr("Must give xyz when using flyto")
             sys.exit(-1)
@@ -142,7 +142,7 @@ if __name__ == "__main__":
                 exit(0)
 
     elif args.command_type == "circle" or args.command_type == "circle_yaw":
-        cmd.command_type = drone_onboard_command.CTRL_POS_COMMAND
+        cmd.command_type = DroneOnboardCommand.CTRL_POS_COMMAND
         print("Will draw circle @ origin {} {} {}, r {} T {}".format(
             args.center[0],
             args.center[1],
@@ -203,7 +203,7 @@ if __name__ == "__main__":
                 exit(0)
 
     elif args.command_type == "csv":
-        cmd.command_type = drone_onboard_command.CTRL_POS_COMMAND
+        cmd.command_type = DroneOnboardCommand.CTRL_POS_COMMAND
         cmd.param4 = 666666
         if args.path=="":
             rospy.loginfo("No csv specs, exit")
@@ -248,7 +248,7 @@ if __name__ == "__main__":
             rate.sleep()
 
     elif args.command_type == "sweep":
-        cmd.command_type = drone_onboard_command.CTRL_POS_COMMAND
+        cmd.command_type = DroneOnboardCommand.CTRL_POS_COMMAND
         cmd.param4 = 666666
 
         print("Will sweep axis {} @ origin {} {} {}, amp {} T {} freq {}:{}/s by{} times".format(

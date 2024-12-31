@@ -1,7 +1,7 @@
 #include <ros/ros.h>
-#include <swarmtal_msgs/drone_pos_ctrl_cmd.h>
-#include <swarmtal_msgs/drone_onboard_command.h>
-#include <swarmtal_msgs/drone_commander_state.h>
+#include <swarmtal_msgs/DronePosCtrlCmd.h>
+#include <swarmtal_msgs/DroneOnboardCommand.h>
+#include <swarmtal_msgs/DroneCommanderState.h>
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/Joy.h>
 #include <std_msgs/UInt8.h>
@@ -21,9 +21,9 @@ using namespace swarmtal_msgs;
 using namespace Eigen;
 
 
-using DCMD=drone_commander_state;
-using OCMD=drone_onboard_command;
-using DPCL=drone_pos_ctrl_cmd;
+using DCMD=DroneCommanderState;
+using OCMD=DroneOnboardCommand;
+using DPCL=DronePosCtrlCmd;
 
 enum class MAV_STATE {
   MAV_STATE_UNINIT,
@@ -52,7 +52,7 @@ public:
     DroneCommander(ros::NodeHandle & _nh);
 protected:
     ros::NodeHandle & nh;
-    drone_commander_state state;
+    DroneCommanderState state;
     DroneCommanderParam param;
 
     ros::Subscriber vo_sub;
@@ -85,7 +85,7 @@ protected:
     ros::Publisher commander_state_pub;
     ros::Publisher ctrl_cmd_pub, control_pos_vel_px4_pub, control_att_pub, mavros_system_status_pub, mavros_odom_pub;
 
-    drone_pos_ctrl_cmd * ctrl_cmd = nullptr;
+    DronePosCtrlCmd * ctrl_cmd = nullptr;
 
     ros::ServiceClient control_auth_client;
     ros::ServiceClient drone_task_control, drone_landing_control;
@@ -129,7 +129,7 @@ protected:
     void rc_callback(const sensor_msgs::Joy & _rc);
     void rc_mavros_callback(const mavros_msgs::RCIn & _rc);
     void flight_status_callback(const std_msgs::UInt8 & _flight_status);
-    void onboard_cmd_callback(const drone_onboard_command & _cmd);
+    void onboard_cmd_callback(const DroneOnboardCommand & _cmd);
     void fc_attitude_callback(const geometry_msgs::QuaternionStamped & _quat);
     void loop(const ros::TimerEvent & _e);
     void battery_callback(const sensor_msgs::BatteryState & _bat);

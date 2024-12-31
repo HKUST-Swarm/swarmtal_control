@@ -110,8 +110,8 @@ DroneCommander::DroneCommander(ros::NodeHandle & _nh): nh(_nh) {
     last_send_odom_to_fc = ros::Time::now();
 
     setupFCControl();
-    commander_state_pub = nh.advertise<drone_commander_state>("swarm_commander_state", 1);
-    ctrl_cmd_pub = nh.advertise<drone_pos_ctrl_cmd>("/drone_position_control/drone_pos_cmd", 1);
+    commander_state_pub = nh.advertise<DroneCommanderState>("swarm_commander_state", 1);
+    ctrl_cmd_pub = nh.advertise<DronePosCtrlCmd>("/drone_position_control/drone_pos_cmd", 1);
     ctrl_cmd = &state.ctrl_cmd;
     loop_timer = nh.createTimer(ros::Duration(LOOP_DURATION), &DroneCommander::loop, this);
 
@@ -605,7 +605,7 @@ void DroneCommander::set_vel_setpoint(double vx, double vy, double vz, double ya
     }
 }
 
-void DroneCommander::onboard_cmd_callback(const drone_onboard_command & _cmd) {
+void DroneCommander::onboard_cmd_callback(const DroneOnboardCommand & _cmd) {
 
     state.onboard_cmd_valid = true;
     last_onboard_cmd_ts = ros::Time::now();
@@ -1228,11 +1228,11 @@ void DroneCommander::send_control_cmd_px4() {
     pos_target.header.stamp = ros::Time::now();
     pos_target.header.frame_id = "world";
     pos_target.coordinate_frame = mavros_msgs::PositionTarget::FRAME_LOCAL_NED; //Note we send FLU
-    if (ctrl_cmd->ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_POS_MODE || 
-            ctrl_cmd->ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_VEL_MODE) {
+    if (ctrl_cmd->ctrl_mode == DronePosCtrlCmd::CTRL_CMD_POS_MODE || 
+            ctrl_cmd->ctrl_mode == DronePosCtrlCmd::CTRL_CMD_VEL_MODE) {
         auto vel_sp = ctrl_cmd->vel_sp;
         auto acc_sp = ctrl_cmd->acc_sp;
-        if (ctrl_cmd->ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_POS_MODE) {
+        if (ctrl_cmd->ctrl_mode == DronePosCtrlCmd::CTRL_CMD_POS_MODE) {
             pos_target.position.x = ctrl_cmd->pos_sp.x;
             pos_target.position.y = ctrl_cmd->pos_sp.y;
             pos_target.position.z = ctrl_cmd->pos_sp.z;
@@ -1260,7 +1260,7 @@ void DroneCommander::send_control_cmd_px4() {
         pos_target.yaw_rate = 0;
         control_pos_vel_px4_pub.publish(pos_target);
     } 
-    if (ctrl_cmd->ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_ATT_VELZ_MODE) {
+    if (ctrl_cmd->ctrl_mode == DronePosCtrlCmd::CTRL_CMD_ATT_VELZ_MODE) {
         //TODO
         Vector3d acc_sp(0., 0., 9.8);
         Quaterniond q_sp = Quaterniond(ctrl_cmd->att_sp.w, ctrl_cmd->att_sp.x, ctrl_cmd->att_sp.y, ctrl_cmd->att_sp.z);
@@ -1279,7 +1279,7 @@ void DroneCommander::send_control_cmd_px4() {
         pos_target.acceleration_or_force.y = acc_sp.y();
         pos_target.acceleration_or_force.z = 0.0;
         control_pos_vel_px4_pub.publish(pos_target);
-    } else if (ctrl_cmd->ctrl_mode == drone_pos_ctrl_cmd::CTRL_CMD_ATT_THRUST_MODE) {
+    } else if (ctrl_cmd->ctrl_mode == DronePosCtrlCmd::CTRL_CMD_ATT_THRUST_MODE) {
         mavros_msgs::AttitudeTarget att_target;
         att_target.header.stamp = ros::Time::now();
         att_target.header.frame_id = "world";
