@@ -1,31 +1,77 @@
-#include <mavros_msgs/PositionTarget.h>
-#include <mavros_msgs/AttitudeTarget.h>
-#include <mavros_msgs/CommandBool.h>
-#include <mavros_msgs/CommandTOL.h>
-#include <mavros_msgs/CommandLong.h>
-#include <mavros_msgs/SetMode.h>
-#include <mavros_msgs/State.h>
-#include <mavros_msgs/ExtendedState.h>
-#include <mavros_msgs/CompanionProcessStatus.h>
+/*************************************************************************************
+ * MIT License
+ * 
+ * Copyright (c) 2025 xuhao3e8
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of this 
+ * software and associated documentation files (the "Software"), to deal in the Software 
+ * without restriction, including without limitation the rights to use, copy, modify, 
+ * merge, publish, distribute, sublicense, and/or sell copies of the Software, and to 
+ * permit persons to whom the Software is furnished to do so, subject to the following 
+ * conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all 
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, 
+ * INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A 
+ * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT 
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION 
+ * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE 
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ * Author: xuhao3e8 <xuhao3e8@gmail.com>
+ *************************************************************************************/
 
-#include "drone_commander.h"
+#include <memory>
+#include <cmath>
+#include <cstdio>
+#include <string>
 
-using namespace swarmtal_msgs;
-using namespace Eigen;
+// ROS2 Core
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp/duration.hpp"
+#include "rclcpp/time.hpp"
+#include "rclcpp/executors/multi_threaded_executor.hpp"
 
-// #define param.max_vo_latency 0.5f
+// Mavros Messages (ensure mavros_msgs is properly available in your ROS2 environment)
+#include "mavros_msgs/msg/position_target.hpp"
+#include "mavros_msgs/msg/attitude_target.hpp"
+#include "mavros_msgs/srv/command_bool.hpp"
+#include "mavros_msgs/srv/command_tol.hpp"
+#include "mavros_msgs/srv/set_mode.hpp"
+#include "mavros_msgs/msg/state.hpp"
+#include "mavros_msgs/msg/extended_state.hpp"
+#include "mavros_msgs/msg/companion_process_status.hpp"
+#include "mavros_msgs/msg/rc_in.hpp"
+
+// Swarmtal Messages (already migrated to ROS2)
+#include "swarmtal_msgs/msg/drone_pos_ctrl_cmd.hpp"
+#include "swarmtal_msgs/msg/drone_onboard_command.hpp"
+#include "swarmtal_msgs/msg/drone_commander_state.hpp"
+
+// Standard ROS2 messages
+#include "nav_msgs/msg/odometry.hpp"
+#include "sensor_msgs/msg/joy.hpp"
+#include "sensor_msgs/msg/battery_state.hpp"
+#include "sensor_msgs/msg/imu.hpp"
+#include "std_msgs/msg/u_int8.hpp"
+#include "geometry_msgs/msg/vector3.hpp"
+#include "geometry_msgs/msg/quaternion_stamped.hpp"
+
+// Eigen
+#include <eigen3/Eigen/Dense>
+
+// Some #defines and constants from original code
 #define MAX_LOSS_RC 1.0f
 #define MAX_LOSS_SDK 1.0f
-
 #define MAX_ODOM_VELOCITY 25.0f
-
 #define RC_DEADZONE_RPY 0.1
 #define RC_DEADZONE_THRUST 0.2
 #define PWM_CENTER 1500.0
 #define PWM_100 500.0
 #define PWM_DEADZONE_RPY 50.0
 #define PWM_DEADZONE_THR 100.0
-
 #define RC_MAX_TILT_VEL 3.0
 #define RC_MAX_Z_VEL 2.0
 #define DEFAULT_MAX_TITL_VEL 5.0
@@ -40,1413 +86,1577 @@ using namespace Eigen;
 #define MIN_TAKEOFF_HEIGHT 0.5
 #define MIN_TRY_ARM_DURATION 1.0
 #define MAX_TRY_ARM_TIMES 5
-
-#define MAX_LOSS_ONBOARD_CMD 60
+#define MAX_LOSS_ONBOARD_CMD 60.0
 #define LANDING_ATT_MODE_HEIGHT 0.1
 #define LANDING_ATT_MIN_HEIGHT 0.1
-
 #define LOOP_DURATION 0.02
-
-// #define DEBUG_OUTPUT
-
 #define MAGIC_YAW_NAN 666666
-
 #define DANGER_SPEED_HOVER (RC_MAX_TILT_VEL+1.5)
-
 #define LANDING_VEL_Z_BATTERY_LOW -0.5
-
 #define EPS 0.01
 
+using namespace Eigen;
+using namespace std::chrono_literals;
+
+// Short alias for swarmtal msgs
+namespace swarmtal_msgs_ros2 = swarmtal_msgs::msg;
+using DCMD = swarmtal_msgs_ros2::DroneCommanderState;
+using OCMD = swarmtal_msgs_ros2::DroneOnboardCommand;
+using DPCL = swarmtal_msgs_ros2::DronePosCtrlCmd;
 
 inline double float_constrain(double v, double min, double max)
 {
-    if (v < min) {
-        return min;
-    }
-    if (v > max) {
-        return max;
-    }
-    return v;
+  if (v < min) return min;
+  if (v > max) return max;
+  return v;
 }
 
 double expo(const double &value, const double &e)
 {
-	double x = float_constrain(value, - 1, 1);
-	double ec = float_constrain(e, 0, 1);
-	return (1 - ec) * x + ec * x * x * x;
+  double x = float_constrain(value, -1.0, 1.0);
+  double ec = float_constrain(e, 0.0, 1.0);
+  return (1 - ec) * x + ec * x * x * x;
 }
 
-const double superexpo(const double &value, double e = 0.5, double g = 0.5)
+double superexpo(const double &value, double e = 0.5, double g = 0.5)
 {
-	double x = float_constrain(value, - 1, 1);
-	double gc = float_constrain(g, 0, 0.99);
-	return expo(x, e) * (1 - gc) / (1 - fabsf(x) * gc);
+  double x = float_constrain(value, -1.0, 1.0);
+  double gc = float_constrain(g, 0.0, 0.99);
+  return expo(x, e) * (1 - gc) / (1 - std::fabs(x) * gc);
 }
 
-
-inline double constrainAngle(double x){
-    x = fmod(x + M_PI, 2*M_PI);
-    if (x < 0)
-        x += 2*M_PI;
-    return x - M_PI;
+inline double constrainAngle(double x) {
+  x = std::fmod(x + M_PI, 2*M_PI);
+  if (x < 0) {
+    x += 2*M_PI;
+  }
+  return x - M_PI;
 }
 
-inline Eigen::Vector3d quat2eulers(Eigen::Quaterniond quat);
+/**
+ * @brief MAV state enumerations (example in C++11 enum class style).
+ */
+enum class MAV_STATE {
+  MAV_STATE_UNINIT,
+  MAV_STATE_BOOT,
+  MAV_STATE_CALIBRATIN,
+  MAV_STATE_STANDBY,
+  MAV_STATE_ACTIVE,
+  MAV_STATE_CRITICAL,
+  MAV_STATE_EMERGENCY,
+  MAV_STATE_POWEROFF,
+  MAV_STATE_FLIGHT_TERMINATION
+};
 
-DroneCommander::DroneCommander(ros::NodeHandle & _nh): nh(_nh) {
-    R_ENU2NED << 0, 1, 0, 1, 0, 0, 0, 0, -1;
-    R_FLU2FRD << 1, 0, 0, 0, -1, 0, 0, 0, -1;
-    param.is_px4 = true;
-    init_states();
-    init_subscribes();
+/**
+ * @brief Convert a quaternion to Euler angles (roll, pitch, yaw).
+ * @param quat Input quaternion.
+ * @return A Vector3d containing roll, pitch, and yaw (in radians).
+ */
+inline Eigen::Vector3d quat2eulers(const Eigen::Quaterniond & quat) {
+  Eigen::Vector3d rpy;
+  rpy.x() = std::atan2(2.0 * (quat.w() * quat.x() + quat.y() * quat.z()),
+                       1.0 - 2.0 * (quat.x() * quat.x() + quat.y() * quat.y()));
+  rpy.y() = std::asin(2.0 * (quat.w() * quat.y() - quat.z() * quat.x()));
+  rpy.z() = std::atan2(2.0 * (quat.w() * quat.z() + quat.x() * quat.y()),
+                       1.0 - 2.0 * (quat.y() * quat.y() + quat.z() * quat.z()));
+  return rpy;
+}
 
-    boot_time = ros::Time::now();
+/**
+ * @brief A ROS2-based DroneCommander class: manages drone state, control, and callbacks.
+ */
+class DroneCommander : public rclcpp::Node
+{
+public:
+  /**
+   * @brief Struct to store parameters for DroneCommander.
+   */
+  struct DroneCommanderParam {
+    bool use_px4_pos_ctrl = true;
+    double max_vo_latency = 0.2;
+    double battery_remain_cutoff = 240.0;
+    double battery_remain_param_a = 345.375;
+    double battery_remain_param_b = -4757.3;
+    double landing_thrust = 0.035;
+    bool is_px4 = false;
+  };
 
-    last_flight_status_ts = ros::Time::now();
-    last_rc_ts = ros::Time::now();
-    last_vo_ts = ros::Time::now();
-    last_onboard_cmd_ts = ros::Time::now();
-    last_try_arm_time = ros::Time::now();
-    last_send_odom_to_fc = ros::Time::now();
+  DroneCommander()
+  : Node("drone_commander")
+  {
+    RCLCPP_INFO(this->get_logger(), "DroneCommander node is initializing...");
 
-    setupFCControl();
-    commander_state_pub = nh.advertise<DroneCommanderState>("swarm_commander_state", 1);
-    ctrl_cmd_pub = nh.advertise<DronePosCtrlCmd>("/drone_position_control/drone_pos_cmd", 1);
-    ctrl_cmd = &state.ctrl_cmd;
-    loop_timer = nh.createTimer(ros::Duration(LOOP_DURATION), &DroneCommander::loop, this);
+    // Initialize transform matrices
+    R_ENU2NED_ << 0, 1, 0,
+                  1, 0, 0,
+                  0, 0, -1;
+    R_FLU2FRD_ <<  1, 0, 0,
+                  0,-1, 0,
+                  0, 0,-1;
 
-    nh.param<bool>("rc_fail_detection", rc_fail_detection, true);
-    nh.param<double>("landing_thrust", param.landing_thrust, 0.2);
-    nh.param<double>("MAX_VO_LATENCY", param.max_vo_latency, 0.4);
-    nh.param<double>("BATTERY_REMAIN_PARAM_A", param.battery_remain_param_a, 345.375);
-    nh.param<double>("BATTERY_REMAIN_PARAM_B", param.battery_remain_param_b, -4757.3);
-    nh.param<double>("BATTERY_REMAIN_CUTOFF", param.battery_remain_cutoff, 240.0);
+    param_.is_px4 = true;
 
+    initStates();
+    declareParameters();
+    getParameters();
+    initROS2Interfaces();
 
-    if (rc_fail_detection) {
-        ROS_INFO("Will detect RC fail");
+    boot_time_ = this->now();
+    last_flight_status_ts_ = this->now();
+    last_rc_ts_ = this->now();
+    last_vo_ts_ = this->now();
+    last_onboard_cmd_ts_ = this->now();
+    last_try_arm_time_ = this->now();
+    last_send_odom_to_fc_ = this->now();
+
+    // Create main control loop timer (50 Hz from LOOP_DURATION=0.02s)
+    loop_timer_ = this->create_wall_timer(
+      std::chrono::duration<double>(LOOP_DURATION),
+      std::bind(&DroneCommander::loopTimerCallback, this)
+    );
+
+    resetCtrlCmdMaxVel();
+
+    RCLCPP_INFO(this->get_logger(), "DroneCommander node has been initialized. Spinning...");
+  }
+
+private:
+  // ------------------- Internal states and parameters -------------------
+  DCMD state_;
+  DroneCommanderParam param_;
+  DPCL * ctrl_cmd_ = nullptr;  // pointer to state_.ctrl_cmd
+
+  // Time trackers
+  rclcpp::Time boot_time_;
+  rclcpp::Time last_rc_ts_;
+  rclcpp::Time last_onboard_cmd_ts_;
+  rclcpp::Time last_vo_ts_;
+  rclcpp::Time last_flight_status_ts_;
+  rclcpp::Time last_try_arm_time_;
+  rclcpp::Time last_vo_image_ts_;
+  rclcpp::Time last_send_odom_to_fc_;
+
+  // Some counters / booleans
+  int fail_arm_times_ = 0;
+  bool yaw_sp_inited_ = false;
+  bool rc_fail_detection_ = true;
+  bool in_fc_landing_ = false;
+  bool is_landing_tail_ = false;
+  bool is_touch_ground_ = false;
+  bool pos_sp_inited_ = false;
+  bool takeoff_inited_ = false;
+  bool landing_inited_ = false;
+  int control_count_ = 0;
+  int last_hover_count_ = -1;
+
+  // Additional states
+  nav_msgs::msg::Odometry odometry_;
+  sensor_msgs::msg::Joy rc_;
+  double yaw_fc_ = 0.0;
+  double yaw_vo_ = 0.0;
+
+  // Transform matrices
+  Eigen::Matrix3d R_ENU2NED_;
+  Eigen::Matrix3d R_FLU2FRD_;
+
+  // Some coordinate variables
+  Eigen::Vector3d hover_pos_ = Eigen::Vector3d(0, 0, 0);
+  Eigen::Vector3d takeoff_origin_ = Eigen::Vector3d(0, 0, 0);
+
+  // ------------------- ROS2 Interfaces -------------------
+  // Subscriptions
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr vo_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr vo_sub_slow_;
+  rclcpp::Subscription<OCMD>::SharedPtr onboard_cmd_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr rc_sub_;
+  rclcpp::Subscription<mavros_msgs::msg::RCIn>::SharedPtr rc_mavros_sub_;
+  rclcpp::Subscription<std_msgs::msg::UInt8>::SharedPtr flight_status_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::QuaternionStamped>::SharedPtr fc_att_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::BatteryState>::SharedPtr bat_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_data_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_fused_data_sub_;
+  rclcpp::Subscription<mavros_msgs::msg::State>::SharedPtr fc_state_sub_;
+  rclcpp::Subscription<mavros_msgs::msg::ExtendedState>::SharedPtr fc_extended_state_sub_;
+
+  // Publishers
+  rclcpp::Publisher<DCMD>::SharedPtr commander_state_pub_;
+  rclcpp::Publisher<DPCL>::SharedPtr ctrl_cmd_pub_;
+  rclcpp::Publisher<mavros_msgs::msg::PositionTarget>::SharedPtr control_pos_vel_px4_pub_;
+  rclcpp::Publisher<mavros_msgs::msg::AttitudeTarget>::SharedPtr control_att_pub_;
+  rclcpp::Publisher<mavros_msgs::msg::CompanionProcessStatus>::SharedPtr mavros_system_status_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr mavros_odom_pub_;
+
+  // Service clients
+  rclcpp::Client<mavros_msgs::srv::SetMode>::SharedPtr control_auth_client_;
+  rclcpp::Client<mavros_msgs::srv::CommandTOL>::SharedPtr drone_landing_control_;
+  // For arming, in the original code: /mavros/cmd/arming (CommandBool)
+  rclcpp::Client<mavros_msgs::srv::CommandBool>::SharedPtr arm_client_;
+
+  // Timer
+  rclcpp::TimerBase::SharedPtr loop_timer_;
+
+  // ------------------- Functions -------------------
+  void initStates()
+  {
+    state_.ctrl_input_state = DCMD::CTRL_INPUT_NONE;
+    state_.flight_status = DCMD::FLIGHT_STATUS_IDLE;
+    state_.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+    state_.djisdk_valid = false;
+    state_.is_armed = false;
+    state_.rc_valid = false;
+    rc_.axes.resize(16);
+    state_.onboard_cmd_valid = false;
+    state_.vo_valid = false;
+    state_.control_auth = DCMD::CTRL_AUTH_RC;
+
+    // The ctrl_cmd pointer references state_.ctrl_cmd
+    ctrl_cmd_ = &state_.ctrl_cmd;
+  }
+
+  void declareParameters()
+  {
+    this->declare_parameter<bool>("rc_fail_detection", true);
+    this->declare_parameter<double>("landing_thrust", 0.2);
+    this->declare_parameter<double>("MAX_VO_LATENCY", 0.4);
+    this->declare_parameter<double>("BATTERY_REMAIN_PARAM_A", 345.375);
+    this->declare_parameter<double>("BATTERY_REMAIN_PARAM_B", -4757.3);
+    this->declare_parameter<double>("BATTERY_REMAIN_CUTOFF", 240.0);
+  }
+
+  void getParameters()
+  {
+    rc_fail_detection_ = this->get_parameter("rc_fail_detection").as_bool();
+    param_.landing_thrust = this->get_parameter("landing_thrust").as_double();
+    param_.max_vo_latency = this->get_parameter("MAX_VO_LATENCY").as_double();
+    param_.battery_remain_param_a = this->get_parameter("BATTERY_REMAIN_PARAM_A").as_double();
+    param_.battery_remain_param_b = this->get_parameter("BATTERY_REMAIN_PARAM_B").as_double();
+    param_.battery_remain_cutoff  = this->get_parameter("BATTERY_REMAIN_CUTOFF").as_double();
+
+    RCLCPP_INFO(this->get_logger(), 
+      "rc_fail_detection=%d, landing_thrust=%.2f, MAX_VO_LATENCY=%.2f, battery_remain_cutoff=%.1f",
+      rc_fail_detection_, param_.landing_thrust, param_.max_vo_latency, param_.battery_remain_cutoff
+    );
+  }
+
+  /**
+   * @brief Set up all subscriptions, publishers, clients, etc.
+   */
+  void initROS2Interfaces()
+  {
+    // Publishers
+    commander_state_pub_ = this->create_publisher<DCMD>("swarm_commander_state", 1);
+    ctrl_cmd_pub_ = this->create_publisher<DPCL>("/drone_position_control/drone_pos_cmd", 1);
+    control_pos_vel_px4_pub_ = this->create_publisher<mavros_msgs::msg::PositionTarget>("/mavros/setpoint_raw/local", 1);
+    control_att_pub_ = this->create_publisher<mavros_msgs::msg::AttitudeTarget>("/mavros/setpoint_raw/attitude", 1);
+    mavros_system_status_pub_ = this->create_publisher<mavros_msgs::msg::CompanionProcessStatus>("/mavros/companion_process/status", 1);
+    mavros_odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/mavros/odometry/out", 10);
+
+    // Subscriptions (use lambda or std::bind)
+    // vo_sub
+    vo_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+      "visual_odometry", 
+      1, 
+      [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
+        this->voCallback(*msg);
+      }
+    );
+    // vo_sub_slow
+    vo_sub_slow_ = this->create_subscription<nav_msgs::msg::Odometry>(
+      "visual_odometry_image", 
+      10,
+      [this](const nav_msgs::msg::Odometry::SharedPtr msg) {
+        this->voCallbackImage(*msg);
+      }
+    );
+    // onboard_cmd_sub
+    onboard_cmd_sub_ = this->create_subscription<OCMD>(
+      "onboard_command",
+      10,
+      [this](const OCMD::SharedPtr cmd) {
+        this->onboardCmdCallback(*cmd);
+      }
+    );
+    // rc_sub (in the original code, it was from dji or something)
+    rc_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
+      "rc",
+      1,
+      [this](const sensor_msgs::msg::Joy::SharedPtr joy) {
+        this->rcCallback(*joy);
+      }
+    );
+    // rc_mavros_sub
+    rc_mavros_sub_ = this->create_subscription<mavros_msgs::msg::RCIn>(
+      "rc_mavros_in",
+      1,
+      [this](const mavros_msgs::msg::RCIn::SharedPtr rc) {
+        this->rcMavrosCallback(*rc);
+      }
+    );
+    // Battery
+    bat_sub_ = this->create_subscription<sensor_msgs::msg::BatteryState>(
+      "battery",
+      1,
+      [this](const sensor_msgs::msg::BatteryState::SharedPtr bat) {
+        this->batteryCallback(*bat);
+      }
+    );
+    // IMU
+    imu_data_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+      "fc_imu",
+      1,
+      [this](const sensor_msgs::msg::Imu::SharedPtr imu) {
+        this->onImuData(*imu);
+      }
+    );
+    imu_fused_data_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
+      "fc_imu_fused",
+      1,
+      [this](const sensor_msgs::msg::Imu::SharedPtr imu) {
+        this->onImuDataFused(*imu);
+      }
+    );
+    // FC state
+    fc_state_sub_ = this->create_subscription<mavros_msgs::msg::State>(
+      "/mavros/state",
+      10,
+      [this](const mavros_msgs::msg::State::SharedPtr st) {
+        this->fcStateCallback(*st);
+      }
+    );
+    fc_extended_state_sub_ = this->create_subscription<mavros_msgs::msg::ExtendedState>(
+      "/mavros/extended_state",
+      10,
+      [this](const mavros_msgs::msg::ExtendedState::SharedPtr est) {
+        this->fcExtendedStateCallback(*est);
+      }
+    );
+
+    // Service clients
+    control_auth_client_ = this->create_client<mavros_msgs::srv::SetMode>("/mavros/set_mode");
+    drone_landing_control_ = this->create_client<mavros_msgs::srv::CommandTOL>("/mavros/cmd/land");
+    arm_client_ = this->create_client<mavros_msgs::srv::CommandBool>("/mavros/cmd/arming");
+
+    RCLCPP_INFO(this->get_logger(), "DroneCommander: waiting for PX4 services...");
+    // Optionally wait for them (blocking) or do it asynchronously
+    // e.g., control_auth_client_->wait_for_service();
+
+    RCLCPP_INFO(this->get_logger(), "DroneCommander: services ready (if found).");
+  }
+
+  /**
+   * @brief Main loop callback (replacing ros::TimerEvent).
+   */
+  void loopTimerCallback()
+  {
+    control_count_++;
+    auto now_t = this->now();
+
+    // Check flight_status_time
+    if (state_.djisdk_valid && (now_t - last_flight_status_ts_).seconds() > MAX_LOSS_SDK) {
+      RCLCPP_INFO(this->get_logger(), "Flight Status lost for %.2f s, invalid", (now_t - last_flight_status_ts_).seconds());
+      state_.djisdk_valid = false;
+    }
+
+    state_.vo_latency = (now_t - last_vo_image_ts_).seconds();
+    if (state_.vo_valid && state_.vo_latency > param_.max_vo_latency) {
+      state_.vo_valid = false;
+      RCLCPP_INFO(this->get_logger(), "VO lost for %.2f s, invalid", state_.vo_latency);
+    }
+
+    if (state_.rc_valid && (now_t - last_rc_ts_).seconds() > MAX_LOSS_RC ) {
+      state_.rc_valid = false;
+      RCLCPP_INFO(this->get_logger(), "RC lost for %.2f s, invalid", (now_t - last_rc_ts_).seconds());
+    }
+
+    if (state_.onboard_cmd_valid && (now_t - last_onboard_cmd_ts_).seconds() > MAX_LOSS_ONBOARD_CMD ) {
+      state_.onboard_cmd_valid = false;
+      RCLCPP_INFO(this->get_logger(), "ONBOARD cmd lost for %.2f s, invalid", (now_t - last_onboard_cmd_ts_).seconds());
+    }
+
+    // Debug print every 10 cycles
+    static int count = 0;
+    if (count++ % 10 == 0) {
+      std::printf("P[%.2f, %.2f, %.2f] TGT [%.2f, %.2f, %.2f]\n"
+                  "ctrl_input_state %d, flight_status %d ctrl_auth %d ctrl_mode %d armed %d in_air %d rc_valid %d onboard_cmd %d vo_valid %d sdk_valid %d\n",
+                  odometry_.pose.pose.position.x,
+                  odometry_.pose.pose.position.y,
+                  odometry_.pose.pose.position.z,
+                  ctrl_cmd_->pos_sp.x,
+                  ctrl_cmd_->pos_sp.y,
+                  ctrl_cmd_->pos_sp.z,
+                  state_.ctrl_input_state,
+                  state_.flight_status,
+                  state_.control_auth,
+                  state_.commander_ctrl_mode,
+                  state_.is_armed,
+                  (state_.flight_status == DCMD::FLIGHT_STATUS_IN_AIR),
+                  state_.rc_valid,
+                  state_.onboard_cmd_valid,
+                  state_.vo_valid,
+                  state_.djisdk_valid
+      );
+    }
+
+    if (!state_.djisdk_valid) {
+      commander_state_pub_->publish(state_);
+      return;
+    }
+
+    if (!yaw_sp_inited_) {
+      resetYawSp();
+    }
+
+    if (!(state_.control_auth == DCMD::CTRL_AUTH_THIS)) {
+      resetCtrlCmd();
+    }
+
+    processInputSource();
+    processControlMode();
+    processControl();
+
+    // Publish the updated commander state
+    commander_state_pub_->publish(state_);
+  }
+
+  // ==================== Helper methods start ====================
+
+  /**
+   * @brief Attempt to call /mavros/cmd/arming service
+   */
+  bool callArmService(bool arm)
+  {
+    if (!arm_client_->service_is_ready()) {
+      RCLCPP_WARN(this->get_logger(), "Arming client not ready!");
+      return false;
+    }
+    auto req = std::make_shared<mavros_msgs::srv::CommandBool::Request>();
+    req->value = arm;
+    auto future = arm_client_->async_send_request(req);
+
+    // Spin until we get the result
+    auto ret = rclcpp::spin_until_future_complete(this->get_node_base_interface(), future);
+    if (ret == rclcpp::FutureReturnCode::SUCCESS) {
+      bool ok = future.get()->success;
+      RCLCPP_INFO(this->get_logger(), "Try arm=%d success=%d", arm, ok);
+      return ok;
     } else {
-        ROS_INFO("Will NOT detect RC fail");
+      RCLCPP_ERROR(this->get_logger(), "callArmService() failed to call service");
+      return false;
     }
-    reset_ctrl_cmd_max_vel();
-}
+  }
 
-void DroneCommander::init_states() {
-    state.ctrl_input_state = DCMD::CTRL_INPUT_NONE;
-    state.flight_status = DCMD::FLIGHT_STATUS_IDLE;
-    state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
-    state.djisdk_valid = false;
-    state.is_armed = false;
-    state.rc_valid = false;
-    rc.axes.resize(16);
-    state.onboard_cmd_valid = false;
-    state.vo_valid = false;
-    state.control_auth = DCMD::CTRL_AUTH_RC;
-}
-
-void DroneCommander::init_subscribes() {
-    vo_sub = nh.subscribe("visual_odometry", 1, &DroneCommander::vo_callback, this, ros::TransportHints().tcpNoDelay());
-    vo_sub_slow = nh.subscribe("visual_odometry_image", 10, &DroneCommander::vo_callback_image, this, ros::TransportHints().tcpNoDelay());
-    onboard_cmd_sub = nh.subscribe("onboard_command", 10, &DroneCommander::onboard_cmd_callback, this, ros::TransportHints().tcpNoDelay());
-    
-}
-
-void DroneCommander::setupFCControl() {
-    rc_sub = nh.subscribe("rc", 1, &DroneCommander::rc_mavros_callback, this, ros::TransportHints().tcpNoDelay());
-    bat_sub = nh.subscribe("battery", 1, &DroneCommander::battery_callback, this,  ros::TransportHints().tcpNoDelay());
-    imu_data_sub = nh.subscribe("fc_imu", 1, &DroneCommander::on_imu_data, this, ros::TransportHints().tcpNoDelay());
-    imu_fused_data_sub = nh.subscribe("fc_imu_fused", 1, &DroneCommander::on_imu_data_fused, this, ros::TransportHints().tcpNoDelay());
-    control_auth_client = nh.serviceClient<mavros_msgs::SetMode>("/mavros/set_mode");
-    ROS_INFO("Waiting for PX4 services.....");
-    control_auth_client.waitForExistence();
-    ROS_INFO("Services ready");
-    drone_landing_control = nh.serviceClient<mavros_msgs::CommandTOL>("/mavros/cmd/land");
-    control_pos_vel_px4_pub = nh.advertise<mavros_msgs::PositionTarget>("/mavros/setpoint_raw/local", 1);
-    mavros_system_status_pub =
-      nh.advertise<mavros_msgs::CompanionProcessStatus>("/mavros/companion_process/status", 1);
-    control_att_pub = nh.advertise<mavros_msgs::AttitudeTarget>("/mavros/setpoint_raw/attitude", 1);
-    mavros_odom_pub = nh.advertise<nav_msgs::Odometry>("/mavros/odometry/out", 10);
-    fc_state_sub = nh.subscribe("/mavros/state", 10, &DroneCommander::fc_state_callback, this, ros::TransportHints().tcpNoDelay());
-    fc_extened_state_sub = nh.subscribe("/mavros/extended_state", 10, &DroneCommander::fc_extended_state_callback, this, ros::TransportHints().tcpNoDelay());
-}
-
-void DroneCommander::loop(const ros::TimerEvent & _e) {
-    static int count = 0; 
-    control_count ++;
-    if (state.djisdk_valid && (ros::Time::now() - last_flight_status_ts).toSec() > MAX_LOSS_SDK) {
-        ROS_INFO("Flight Status loss time %3.2f, is invalid", (ros::Time::now() - last_flight_status_ts).toSec());        
-        state.djisdk_valid = false;
+  void tryArm(bool arm)
+  {
+    if (arm == state_.is_armed) {
+      return;
     }
-
-    state.vo_latency = (ros::Time::now() - last_vo_image_ts).toSec();
-
-    if (state.vo_valid && (ros::Time::now() - last_vo_image_ts).toSec() > param.max_vo_latency) {
-        state.vo_valid = false;
-        ROS_INFO("VO loss time %3.2f, is invalid", (ros::Time::now() - last_vo_image_ts).toSec());
-    }
-
-    if (state.rc_valid && (ros::Time::now() - last_rc_ts).toSec() > MAX_LOSS_RC ) {
-        state.rc_valid = false;
-        ROS_INFO("RC loss time %3.2f, is invalid", (ros::Time::now() - last_rc_ts).toSec());
-    }
-
-    if (state.onboard_cmd_valid&& (ros::Time::now() - last_onboard_cmd_ts).toSec() > MAX_LOSS_ONBOARD_CMD ) {
-        state.onboard_cmd_valid = false;
-        ROS_INFO("ONBOARD loss time %3.2f, is invalid", (ros::Time::now() - last_onboard_cmd_ts).toSec());
-    }
-
-
-    if (count ++ % 10 == 0)
-    {
-        // if (rc.axes.size() >= 6)
-        // ROS_INFO("RC valid %d %3.2f %3.2f %3.2f %3.2f %4.0f %4.0f",
-        //     state.rc_valid,
-        //     rc.axes[0],
-        //     rc.axes[1],
-        //     rc.axes[2],
-        //     rc.axes[3],
-        //     rc.axes[4],
-        //     rc.axes[5]
-        // );
-        printf("P[%3.2f,%3.2f,%3.2f] TGT [%3.2f,%3.2f, %3.2f]\nctrl_input_state %d, flight_status %d ctrl_auth %d  ctrl_mode %d armed %d in_air %d rc_valid %d onboard_cmd %d vo_valid %d sdk_valid %d\n",
-    	    odometry.pose.pose.position.x,
-	        odometry.pose.pose.position.y,
-	        odometry.pose.pose.position.z,
-            ctrl_cmd->pos_sp.x,
-            ctrl_cmd->pos_sp.y,
-            ctrl_cmd->pos_sp.z,
-            state.ctrl_input_state,
-            state.flight_status,
-            state.control_auth,
-            state.commander_ctrl_mode,
-            state.is_armed,
-            state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR,
-            state.rc_valid,
-            state.onboard_cmd_valid,
-            state.vo_valid,
-            state.djisdk_valid);
-    }
-
-    if (!state.djisdk_valid) {
-    	commander_state_pub.publish(state);
-        return;
-    }
-    
-    if (!yaw_sp_inited) {
-        reset_yaw_sp();
-    }
-
-    if (!(state.control_auth == DCMD::CTRL_AUTH_THIS))
-        reset_ctrl_cmd();
-    
-    process_input_source();
-
-    process_control_mode();
-    process_control();
-
-    if (!check_control_auth()) {
-        // printf("No ctrl auth... reseting yaw_sp\n");
-        reset_yaw_sp();
-        last_hover_count = -1;
-    }
-
-    commander_state_pub.publish(state);
-}
-
-bool DroneCommander::callArmService(bool arm) {
-    mavros_msgs::CommandBool arm_cmd;
-    arm_cmd.request.value = arm;
-    ros::service::call("/mavros/cmd/arming", arm_cmd);
-    ROS_INFO("Try arm %d success %d", arm, arm_cmd.response.success);
-    return arm_cmd.response.success;
-    return false;
-}
-
-void DroneCommander::try_arm(bool arm) {
-    if (arm==state.is_armed )
-        return;
-    // if ((ros::Time::now() - last_try_arm_time).toSec() < MIN_TRY_ARM_DURATION) {
-    //     ROS_INFO("Will try arm again later");
-    //     return;
-    // }
-    if (fail_arm_times > MAX_TRY_ARM_TIMES) {
-        ROS_INFO("Fail arm too much times, give up dear, Request IDLE!");
-        request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
-
-        return;
+    if (fail_arm_times_ > MAX_TRY_ARM_TIMES) {
+      RCLCPP_INFO(this->get_logger(), "Fail arm too many times, giving up. Request IDLE!");
+      requestCtrlMode(DCMD::CTRL_MODE_IDLE);
+      return;
     }
     if (!arm) {
-        request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
+      requestCtrlMode(DCMD::CTRL_MODE_IDLE);
     }
-    if (state.djisdk_valid && state.flight_status == DCMD::FLIGHT_STATUS_IDLE && arm) {
-        if (!callArmService(arm)) {
-            fail_arm_times ++;
-        }
+    if (state_.djisdk_valid && state_.flight_status == DCMD::FLIGHT_STATUS_IDLE && arm) {
+      bool res = callArmService(arm);
+      if (!res) {
+        fail_arm_times_++;
+      }
     }
-    if (state.djisdk_valid && ! arm) {
-        // if *
-        if (!callArmService(arm)) {
-            fail_arm_times ++;
-        }
+    if (state_.djisdk_valid && !arm) {
+      bool res = callArmService(arm);
+      if (!res) {
+        fail_arm_times_++;
+      }
     }
-    last_try_arm_time = ros::Time::now();
-}
+    last_try_arm_time_ = this->now();
+  }
 
-void DroneCommander::try_control_auth(bool auth) {
-    if (!state.is_armed) {
-        //May auth only when armed.
-        return;
+  void tryControlAuth(bool auth)
+  {
+    if (!state_.is_armed) {
+      // May auth only if armed
+      return;
     }
-    mavros_msgs::SetMode offb_set_mode;
+    if (!control_auth_client_->service_is_ready()) {
+      RCLCPP_WARN(this->get_logger(), "SetMode service not ready!");
+      return;
+    }
+    auto req = std::make_shared<mavros_msgs::srv::SetMode::Request>();
     if (auth) {
-        offb_set_mode.request.custom_mode = "OFFBOARD";
+      req->custom_mode = "OFFBOARD";
     } else {
-        offb_set_mode.request.custom_mode = "ALTCTL"; // Release control to RC
+      req->custom_mode = "ALTCTL";
     }
-    if (control_auth_client.call(offb_set_mode) && offb_set_mode.response.mode_sent) {
-        ROS_INFO("Offboard enable failed");
+    auto future = control_auth_client_->async_send_request(req);
+    auto ret = rclcpp::spin_until_future_complete(this->get_node_base_interface(), future);
+    if (ret == rclcpp::FutureReturnCode::SUCCESS) {
+      bool result_ok = future.get()->mode_sent;
+      if (!result_ok) {
+        RCLCPP_INFO(this->get_logger(), "SetMode %s failed", req->custom_mode.c_str());
+      }
     }
-}
+  }
 
-bool DroneCommander::nead_control_by_this() {
-    if (param.is_px4) {
-        return this->rc_request_vo() || this->rc_request_onboard();
+  bool needControlByThis()
+  {
+    if (param_.is_px4) {
+      return rcRequestVo() || rcRequestOnboard();
     } else {
-        return this->rc_request_vo();
+      return rcRequestVo();
     }
-}
+  }
 
-bool DroneCommander::check_control_auth() {
+  bool checkControlAuth()
+  {
     bool require_auth_this = true;
-    if (!state.djisdk_valid)
-        return false;
-    if (state.rc_valid) {
-        if (nead_control_by_this()) {
-            require_auth_this = true;
-        } else {
-            require_auth_this = false;
-        }
+    if (!state_.djisdk_valid) {
+      return false;
     }
-
-    //If rc still not available, will try to grab auth
-    if (!state.rc_valid) {
+    if (state_.rc_valid) {
+      if (needControlByThis()) {
         require_auth_this = true;
+      } else {
+        require_auth_this = false;
+      }
     }
-
-    if ((require_auth_this && state.control_auth != DCMD::CTRL_AUTH_THIS) ||
-        (!require_auth_this && state.control_auth == DCMD::CTRL_AUTH_THIS)) {
-        try_control_auth(require_auth_this);
+    if (!state_.rc_valid) {
+      // If RC is invalid, still try to get auth
+      require_auth_this = true;
     }
-
-    return state.control_auth == DCMD::CTRL_AUTH_THIS;
-}
-
-
-void DroneCommander::vo_callback_image(const nav_msgs::Odometry & _odom) {
-    last_vo_image_ts = _odom.header.stamp;
-
-}
-
-void DroneCommander::sendPX4SystemActive() {
-    mavros_msgs::CompanionProcessStatus status_msg;
-    status_msg.header.stamp = ros::Time::now();
-    status_msg.component = 197;
-    status_msg.state = (int) MAV_STATE::MAV_STATE_ACTIVE;
-    mavros_system_status_pub.publish(status_msg);
-}
-
-void DroneCommander::sendPX4SystemInactive() {
-    mavros_msgs::CompanionProcessStatus status_msg;
-    status_msg.header.stamp = ros::Time::now();
-    status_msg.component = 197;
-    status_msg.state = (int) MAV_STATE::MAV_STATE_FLIGHT_TERMINATION;
-    mavros_system_status_pub.publish(status_msg);
-}
-
-void DroneCommander::vo_callback(const nav_msgs::Odometry & _odom) {
-    bool vo_valid = is_odom_valid(_odom);
-    //printf("VO valid %d", vo_valid);
-    auto pose = _odom.pose.pose;
-    auto quat = FLU2NED(Eigen::Quaterniond(pose.orientation.w, 
-        pose.orientation.x, pose.orientation.y, pose.orientation.z));
-    Eigen::Vector3d rpy = quat2eulers(quat);
-    yaw_vo = rpy.z();
-    if (!state.vo_valid && vo_valid) {
-        //Vo first time come
-        //reset yaw sp use vo yaw
-        reset_yaw_sp();
-    }
-    state.vo_valid = vo_valid;
-    if (state.vo_valid) {
-        odometry = _odom;
-        //FIX vo lost due to time align
-        last_vo_ts = odometry.header.stamp;
-    }
-
-    state.pos.x = pose.position.x;
-    state.pos.y = pose.position.y;
-    state.pos.z = pose.position.z;
-
-    state.vel.x = _odom.twist.twist.linear.x;
-    state.vel.y = _odom.twist.twist.linear.y;
-    state.vel.z = _odom.twist.twist.linear.z;
-    state.yaw = yaw_vo;
-}
-
-inline double lowpass_filter(double input, double fc, double outputlast, double dt) {
-	double RC = 1.0 / (fc *2 * M_PI);
-	double alpha = dt / (RC + dt);
-	return outputlast + (alpha* (input - outputlast));
-}
-
-void DroneCommander::battery_callback(const sensor_msgs::BatteryState &_bat) {
-    state.bat_vol = _bat.voltage;
-
-    double battery_life_tmp = param.battery_remain_param_a * state.bat_vol + param.battery_remain_param_b;
-
-    // if ((battery_life - battery_life_tmp) > 60)
-    //     battery_life = battery_life - 60;
-    // else if ((battery_life - battery_life_tmp) < -60)
-    //     battery_life = battery_life + 60;
-    // else
-    //     battery_life = param.battery_remain_param_a* state.bat_vol + param.battery_remain_param_b;
-
-    state.bat_remain = lowpass_filter(battery_life_tmp, 2 , state.bat_remain, 0.1);
-
-    //ROS_INFO("Battery Level: %3.2f, Left Time: %3.2f", state.bat_vol, state.bat_remain);
-
-    if (state.bat_remain <= param.battery_remain_cutoff &&
-        state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) {
-        //ROS_INFO("Battery Low, Landing");
-        state.landing_mode = DCMD::LANDING_MODE_XYVEL;
-        state.landing_velocity = LANDING_VEL_Z_BATTERY_LOW;
-        request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
-        process_control_landing();
-    }
-    else  {
-        //ROS_INFO("Battery Low");
-    }
-}
-
-void DroneCommander::rc_callback(const sensor_msgs::Joy & _rc) {
-    state.rc_valid = is_rc_valid(_rc);
-    
-    if (state.rc_valid) {
-        rc = _rc;
-        last_rc_ts = ros::Time::now();
-    }
-
-    state.djisdk_valid = true;
-}
-
-void DroneCommander::rc_mavros_callback(const mavros_msgs::RCIn & _rc) {
-    if (rc.axes.size() < _rc.channels.size()) {
-        rc.axes.resize(_rc.channels.size());
-    }
-    for (unsigned int i = 0; i < _rc.channels.size(); i++) {
-        rc.axes[i] = _rc.channels[i];
-    }
-    last_rc_ts = ros::Time::now();
-    state.rc_valid = true;
-    state.djisdk_valid = true;
-    last_flight_status_ts = ros::Time::now();
-}
-
-
-void DroneCommander::fc_state_callback(const mavros_msgs::State & _state) {
-    px4_fcu_state = _state;
-    state.is_armed  = px4_fcu_state.armed;
-    state.djisdk_valid = true;
-    if (px4_fcu_state.mode == mavros_msgs::State::MODE_PX4_OFFBOARD) {
-        state.control_auth = DCMD::CTRL_AUTH_THIS;
-    } else {
-        state.control_auth = DCMD::CTRL_AUTH_RC;
-    }
-    if (px4_fcu_state.system_status == 3 || !state.is_armed) {
-        state.flight_status = DCMD::FLIGHT_STATUS_IDLE;
-    }
-    if (state.is_armed && state.flight_status == DCMD::FLIGHT_STATUS_IDLE) {
-        state.flight_status = DCMD::FLIGHT_STATUS_ARMED;
-    }
-    last_flight_status_ts = ros::Time::now();
-}
-
-void DroneCommander::fc_extended_state_callback(const mavros_msgs::ExtendedState & _state) {
-    if (_state.landed_state == mavros_msgs::ExtendedState::LANDED_STATE_IN_AIR) {
-        state.flight_status = DCMD::FLIGHT_STATUS_IN_AIR;
-    } else if (_state.landed_state == mavros_msgs::ExtendedState::LANDED_STATE_ON_GROUND && state.is_armed) {
-        state.flight_status = DCMD::FLIGHT_STATUS_ARMED;
-    }
-}
-
-void DroneCommander::flight_status_callback(const std_msgs::UInt8 & _flight_status) {
-    //TODO:
-    uint8_t _status = _flight_status.data;
-    if (_status == 0) {
-        //IS on land not arm
-        state.flight_status = DCMD::FLIGHT_STATUS_IDLE;
-        state.is_armed = false;
-    }
-
-    if (_status == 1) {
-        // Onland armed
-        state.flight_status = DCMD::FLIGHT_STATUS_ARMED;
-        state.is_armed = true;
-    }
-
-    if (_status == 2) {
-        //In air
-        state.flight_status = DCMD::FLIGHT_STATUS_IN_AIR;
-        state.is_armed = true;
-    }
-
-    state.djisdk_valid = true;
-    last_flight_status_ts = ros::Time::now();
-}
-
-void DroneCommander::fc_attitude_callback(const geometry_msgs::QuaternionStamped & _quat) {
-    geometry_msgs::Quaternion quat = _quat.quaternion;
-    auto q = ENU2NED(Eigen::Quaterniond(quat.w, quat.x, quat.y, quat.z));
-    Eigen::Vector3d rpy = quat2eulers(q);
-    //Original rpy is ENU, we need NED rpy
-    yaw_fc = rpy.z();
-}
-
-void DroneCommander::on_imu_data(const sensor_msgs::Imu & _imu) {
-
-    state.imu_data = _imu;
-    last_flight_status_ts = ros::Time::now();
-    // ROS_INFO("Imu data acc z: %f", state.imu_data.linear_acceleration.z);
-    return;
-    // Eigen::Vector3d acc(
-    //     state.imu_data.linear_acceleration.x,
-    //     state.imu_data.linear_acceleration.y,
-    //     state.imu_data.linear_acceleration.z
-    // );
-}
-
-void DroneCommander::on_imu_data_fused(const sensor_msgs::Imu & _imu) {
-    geometry_msgs::Quaternion quat = _imu.orientation;
-    auto q = ENU2NED(Eigen::Quaterniond(quat.w, quat.x, quat.y, quat.z));
-    Eigen::Vector3d rpy = quat2eulers(q);
-    //Original rpy is ENU, we need NED rpy
-    yaw_fc = rpy.z();
-    last_flight_status_ts = ros::Time::now();
-}
-
-
-void DroneCommander::set_att_setpoint(double roll, double pitch, double yaw, double z, bool z_use_vel, bool yaw_use_rate, bool use_fc_yaw) {
-
-    ctrl_cmd->use_fc_yaw = use_fc_yaw;
-    if (yaw_use_rate) {
-        yaw = ctrl_cmd->yaw_sp = constrainAngle(ctrl_cmd->yaw_sp + yaw * LOOP_DURATION);
-    } else {
-        ctrl_cmd->yaw_sp = constrainAngle(yaw);
-    }
-
-    Quaterniond quat_sp = AngleAxisd(yaw, Vector3d::UnitZ()) * AngleAxisd(pitch, Vector3d::UnitY()) * AngleAxisd(roll, Vector3d::UnitX());
-    
-    ctrl_cmd->att_sp.w = quat_sp.w();
-    ctrl_cmd->att_sp.x = quat_sp.x();
-    ctrl_cmd->att_sp.y = quat_sp.y();
-    ctrl_cmd->att_sp.z = quat_sp.z();
-    ctrl_cmd->z_sp = z;
-
-    if ((state.is_armed && state.control_auth == DCMD::CTRL_AUTH_THIS) || param.is_px4) {
-        if (z_use_vel) {
-            ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_ATT_VELZ_MODE;
-        } else {
-            ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_ATT_THRUST_MODE;
-        }
-    } else {
-        ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
-    }
-}
-
-void DroneCommander::set_pos_setpoint(double x, double y, double z, double yaw, double vx_ff, double vy_ff, double vz_ff, double ax_ff, double ay_ff, double az_ff) {
-    ctrl_cmd->pos_sp.x = x;
-    ctrl_cmd->pos_sp.y = y;
-    ctrl_cmd->pos_sp.z = z;
-    ctrl_cmd->vel_sp.x = vx_ff;
-    ctrl_cmd->vel_sp.y = vy_ff;
-    ctrl_cmd->vel_sp.z = vz_ff;
-    ctrl_cmd->acc_sp.x = ax_ff;
-    ctrl_cmd->acc_sp.y = ay_ff;
-    ctrl_cmd->acc_sp.z = az_ff;
-    ctrl_cmd->use_fc_yaw = false;
-    if (!std::isnan(yaw)) {
-        ctrl_cmd->yaw_sp = constrainAngle(yaw);
-    }
-
-    if (state.is_armed && state.control_auth == DCMD::CTRL_AUTH_THIS || param.is_px4) {
-        ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_POS_MODE;
-    } else {
-        ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
-    }
-}
-
-void DroneCommander::set_vel_setpoint(double vx, double vy, double vz, double yaw, double ax_ff, double ay_ff, double az_ff) {
-    ctrl_cmd->vel_sp.x = vx;
-    ctrl_cmd->vel_sp.y = vy;
-    ctrl_cmd->vel_sp.z = vz;
-    ctrl_cmd->acc_sp.x = ax_ff;
-    ctrl_cmd->acc_sp.y = ay_ff;
-    ctrl_cmd->acc_sp.z = az_ff;
-    if (!std::isnan(yaw)) {
-        ctrl_cmd->yaw_sp = constrainAngle(yaw);
-    }
-
-    ctrl_cmd->use_fc_yaw = false;
-    
-    if (state.is_armed && state.control_auth == DCMD::CTRL_AUTH_THIS || param.is_px4) {
-        ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_VEL_MODE;
-    } else {
-        ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
-    }
-}
-
-void DroneCommander::onboard_cmd_callback(const DroneOnboardCommand & _cmd) {
-
-    state.onboard_cmd_valid = true;
-    last_onboard_cmd_ts = ros::Time::now();
-    if (state.ctrl_input_state != DCMD::CTRL_INPUT_ONBOARD) {
-        process_input_source();
-    }
-
-    if (state.ctrl_input_state == DCMD::CTRL_INPUT_ONBOARD) {
-        switch (_cmd.command_type) {
-            case OCMD::CTRL_POS_COMMAND: {
-                request_ctrl_mode(DCMD::CTRL_MODE_POSVEL);
-                double x = ((double)_cmd.param1) / 10000;
-                double y = ((double)_cmd.param2) / 10000;
-                double z = ((double)_cmd.param3) / 10000;
-                double yaw = ((double) _cmd.param4) / 10000;
-                double vx_ff = ((double)_cmd.param5) / 10000;
-                double vy_ff = ((double)_cmd.param6) / 10000;
-                double vz_ff = ((double)_cmd.param7) / 10000;
-                double ax_ff = ((double)_cmd.param8) / 10000;
-                double ay_ff = ((double)_cmd.param9) / 10000;
-                double az_ff = ((double)_cmd.param10) / 10000;
-
-                if (_cmd.param4 == MAGIC_YAW_NAN) {
-                    set_pos_setpoint(x, y, z, NAN, vx_ff, vy_ff, vz_ff, ax_ff, ay_ff, az_ff);
-                } else {
-                    set_pos_setpoint(x, y, z, yaw, vx_ff, vy_ff, vz_ff, ax_ff, ay_ff, az_ff);
-                }
-
-                break;
-            }
-
-            case OCMD::CTRL_VEL_COMMAND: {
-                request_ctrl_mode(DCMD::CTRL_MODE_POSVEL);
-                double x = ((double)_cmd.param1) / 10000;
-                double y = ((double)_cmd.param2) / 10000;
-                double z = ((double)_cmd.param3) / 10000;
-                double yaw = ((double) _cmd.param4) / 10000;
-
-                double ax_ff = ((double)_cmd.param5) / 10000;
-                double ay_ff = ((double)_cmd.param6) / 10000;
-                double az_ff = ((double)_cmd.param7) / 10000;
-
-                if (_cmd.param4 == MAGIC_YAW_NAN) {
-                    set_vel_setpoint(x, y, z, ax_ff, ay_ff, az_ff);
-                }
-                break;
-            }
-            case OCMD::CTRL_ATT_COMMAND: {
-                request_ctrl_mode(DCMD::CTRL_MODE_ATT);
-
-                double roll = ((double)_cmd.param1) / 10000;
-                double pitch = ((double)_cmd.param2) / 10000;
-                double yaw_rate = ((double)_cmd.param3) / 10000;
-                double z = ((double)_cmd.param4) / 10000;
-                set_att_setpoint(roll, pitch, yaw_rate, z, _cmd.param5 == 0, _cmd.param6 == 0);
-                break;
-            }
-
-            case OCMD::CTRL_MISSION_LOAD_COMMAND: {
-                
-                request_ctrl_mode(DCMD::CTRL_MODE_MISSION);
-                break;
-            }
-
-            case OCMD::CTRL_MISSION_END_COMMAND: {
-                request_ctrl_mode(DCMD::CTRL_MODE_HOVER);
-                break;
-            }
-
-            case OCMD::CTRL_TAKEOF_COMMAND: {
-                // if (state.)
-                fail_arm_times = 0;
-                double h = ((double)_cmd.param1) / 10000;
-                if (h < MIN_TAKEOFF_HEIGHT) {
-                    h = MIN_TAKEOFF_HEIGHT;
-                }
-                ROS_INFO("Onboard trying to takeoff, will hover at %3.2f", h);
-
-                request_ctrl_mode(DCMD::CTRL_MODE_TAKEOFF);
-                state.takeoff_target_height = h;
-                state.takeoff_velocity = ((double)_cmd.param2) / 10000.0;
-                break;
-            };
-
-            case OCMD::CTRL_LANDING_COMMAND: {
-                ROS_INFO("Onboard trying to Landing");
-                if (_cmd.param1 < 0) {
-                    state.landing_mode = DCMD::LANDING_MODE_ATT;
-                    is_landing_tail = true;
-                }
-                else if (_cmd.param1 == 1) {
-                    state.landing_mode = DCMD::LANDING_MODE_ATT;
-                } else {
-                    state.landing_mode = DCMD::LANDING_MODE_XYVEL;
-                    is_landing_tail = false;
-                    is_touch_ground = false;
-                }
-
-                state.landing_velocity = -((double)_cmd.param2) / 10000.0;
-
-                request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
-                break;
-            }
-
-
-            case OCMD::CTRL_HOVER_COMMAND: {
-                request_ctrl_mode(DCMD::CTRL_MODE_HOVER);
-                break;
-            }
-
-            case OCMD::CTRL_ARM_COMMAND: {
-                fail_arm_times = 0;
-                ROS_INFO("Onboard command arm %d", _cmd.param1);
-                try_arm(_cmd.param1 > 0);
-                break;
-            }
-        }
-    }
-}
-
-
-bool DroneCommander::rc_request_onboard() {
-    return (rc.axes[6] > 1800 && rc.axes[7] > 1800);
-}
-
-bool DroneCommander::rc_request_vo() {
-    //PX4 is 1000 to 2000
-    return (rc.axes[6] > 1800);
-}
-
-bool DroneCommander::rc_moving_stick () {
-    if (!state.rc_valid)
+    if ((require_auth_this && state_.control_auth != DCMD::CTRL_AUTH_THIS) ||
+        (!require_auth_this && state_.control_auth == DCMD::CTRL_AUTH_THIS))
     {
-        return false;
+      tryControlAuth(require_auth_this);
     }
-    bool if_move =  fabs(rc.axes[0] - PWM_CENTER) > PWM_DEADZONE_RPY;
-    if_move = if_move || fabs(rc.axes[1] - PWM_CENTER) > PWM_DEADZONE_RPY;
-    if_move = if_move || fabs(rc.axes[3] - PWM_CENTER) > PWM_DEADZONE_RPY;
-    if_move = if_move || fabs(rc.axes[2] - PWM_CENTER) > PWM_DEADZONE_THR;
-    return if_move;
-}
+    return (state_.control_auth == DCMD::CTRL_AUTH_THIS);
+  }
 
-void DroneCommander::process_input_source () {
-    if (state.ctrl_input_state == DCMD::CTRL_INPUT_NONE) {
-        if (state.rc_valid) {
-            state.ctrl_input_state = DCMD::CTRL_INPUT_RC;
-            ROS_INFO("Change Source to RC");
-        } else if (state.onboard_cmd_valid){
-            state.ctrl_input_state = DCMD::CTRL_INPUT_ONBOARD;
-            ROS_INFO("Change Source to onboard because no RC and onboard vaild");
-        }
+  // ==================== Callbacks ====================
+  void voCallbackImage(const nav_msgs::msg::Odometry & odom)
+  {
+    last_vo_image_ts_ = odom.header.stamp;
+  }
+
+  void voCallback(const nav_msgs::msg::Odometry & odom)
+  {
+    bool vo_valid = isOdomValid(odom);
+    auto pose = odom.pose.pose;
+    auto quat = FLU2NED(Eigen::Quaterniond(pose.orientation.w,
+                                           pose.orientation.x,
+                                           pose.orientation.y,
+                                           pose.orientation.z));
+    Eigen::Vector3d rpy = quat2eulers(quat);
+    yaw_vo_ = rpy.z();
+
+    if (!state_.vo_valid && vo_valid) {
+      // VO becomes valid for the first time => reset yaw setpoint with VO yaw
+      resetYawSp();
     }
-
-    if (state.ctrl_input_state == DCMD::CTRL_INPUT_RC) {
-        if (!state.rc_valid){
-            state.ctrl_input_state = DCMD::CTRL_INPUT_NONE;
-            ROS_INFO("Change Source to None because RC Failure");
-            if (state.onboard_cmd_valid) {
-                state.ctrl_input_state = DCMD::CTRL_INPUT_ONBOARD;
-                ROS_INFO("Change Source to CMD because RC Failure and cmd vaild");
-            }
-        } else if (this->rc_request_onboard() && state.onboard_cmd_valid) {
-            state.ctrl_input_state = DCMD::CTRL_INPUT_ONBOARD;
-            ROS_INFO("Change Source to onboard because ctrl require onboard");
-        }
+    state_.vo_valid = vo_valid;
+    if (state_.vo_valid) {
+      odometry_ = odom;
+      last_vo_ts_ = odometry_.header.stamp;
     }
 
-    if (state.ctrl_input_state == DCMD::CTRL_INPUT_ONBOARD) {
-        if (!state.onboard_cmd_valid)
-        {
-            if (state.rc_valid) {
-                state.ctrl_input_state = DCMD::CTRL_INPUT_RC;
-                ROS_INFO("Onboard invaild. Change Source to RC");
-            } else {
-                state.ctrl_input_state = DCMD::CTRL_INPUT_NONE;
-                ROS_INFO("Onboard invail. Change Source to None");
-            }
-        }
+    state_.pos.x = pose.position.x;
+    state_.pos.y = pose.position.y;
+    state_.pos.z = pose.position.z;
+    state_.vel.x = odom.twist.twist.linear.x;
+    state_.vel.y = odom.twist.twist.linear.y;
+    state_.vel.z = odom.twist.twist.linear.z;
+    state_.yaw = yaw_vo_;
+  }
+
+  void rcCallback(const sensor_msgs::msg::Joy & joy)
+  {
+    state_.rc_valid = isRcValid(joy);
+    if (state_.rc_valid) {
+      rc_ = joy;
+      last_rc_ts_ = this->now();
     }
+    state_.djisdk_valid = true;
+  }
 
-    // ROS_INFO("In state %d", state.ctrl_input_state);
-
-    switch (state.ctrl_input_state) {
-        case DCMD::CTRL_INPUT_RC:
-            process_rc_input();
-            break;
-        case DCMD::CTRL_INPUT_ONBOARD:
-            process_onboard_input();
-            break;
-        default:
-        case DCMD::CTRL_INPUT_NONE:
-            process_none_input();
-            break;
+  void rcMavrosCallback(const mavros_msgs::msg::RCIn & rc_in)
+  {
+    // Convert RCIn to Joy style
+    if (rc_.axes.size() < rc_in.channels.size()) {
+      rc_.axes.resize(rc_in.channels.size());
     }
-    // ROS_INFO("In2 state %d", state.ctrl_input_state);
-
-}
-
-
-void DroneCommander::process_rc_input () {
-    if (state.control_auth != DCMD::CTRL_AUTH_THIS && !param.is_px4) {
-        state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
-        return;
+    for (size_t i = 0; i < rc_in.channels.size(); i++) {
+      rc_.axes[i] = rc_in.channels[i];
     }
-    
-    //Force RC control velocity
-    if (rc_moving_stick()) {
-        request_ctrl_mode(DCMD::CTRL_MODE_POSVEL);
+    last_rc_ts_ = this->now();
+    state_.rc_valid = true;
+    state_.djisdk_valid = true;
+    last_flight_status_ts_ = this->now();
+  }
+
+  void batteryCallback(const sensor_msgs::msg::BatteryState & bat)
+  {
+    state_.bat_vol = bat.voltage;
+    double battery_life_tmp = param_.battery_remain_param_a * state_.bat_vol + param_.battery_remain_param_b;
+    state_.bat_remain = lowpassFilter(battery_life_tmp, 2.0, state_.bat_remain, 0.1);
+
+    // If battery is too low, force landing
+    if (state_.bat_remain <= param_.battery_remain_cutoff &&
+        state_.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) {
+      state_.landing_mode = DCMD::LANDING_MODE_XYVEL;
+      state_.landing_velocity = LANDING_VEL_Z_BATTERY_LOW;
+      requestCtrlMode(DCMD::CTRL_MODE_LANDING);
+      processControlLanding();
+    }
+  }
+
+  void fcStateCallback(const mavros_msgs::msg::State & st)
+  {
+    state_.is_armed = st.armed;
+    state_.djisdk_valid = true;
+    if (st.mode == "OFFBOARD") {
+      state_.control_auth = DCMD::CTRL_AUTH_THIS;
     } else {
-        if (state.commander_ctrl_mode != DCMD::CTRL_MODE_MISSION && 
-            state.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF &&
-            state.commander_ctrl_mode != DCMD::CTRL_MODE_LANDING) {
-            // ROS_INFO("Stick not moving, using hOver mode");
-            //When no input and not takeoff and not landing, turn to hover
-            request_ctrl_mode(DCMD::CTRL_MODE_HOVER);
-        } else {
-            // ROS_INFO("Waiting for");
-        }
+      state_.control_auth = DCMD::CTRL_AUTH_RC;
+    }
+    if (st.system_status == 3 || !state_.is_armed) {
+      state_.flight_status = DCMD::FLIGHT_STATUS_IDLE;
+    }
+    if (state_.is_armed && state_.flight_status == DCMD::FLIGHT_STATUS_IDLE) {
+      state_.flight_status = DCMD::FLIGHT_STATUS_ARMED;
+    }
+    last_flight_status_ts_ = this->now();
+  }
+
+  void fcExtendedStateCallback(const mavros_msgs::msg::ExtendedState & est)
+  {
+    if (est.landed_state == mavros_msgs::msg::ExtendedState::LANDED_STATE_IN_AIR) {
+      state_.flight_status = DCMD::FLIGHT_STATUS_IN_AIR;
+    } else if (est.landed_state == mavros_msgs::msg::ExtendedState::LANDED_STATE_ON_GROUND && state_.is_armed) {
+      state_.flight_status = DCMD::FLIGHT_STATUS_ARMED;
+    }
+  }
+
+  void onboardCmdCallback(const OCMD & cmd)
+  {
+    state_.onboard_cmd_valid = true;
+    last_onboard_cmd_ts_ = this->now();
+    if (state_.ctrl_input_state != DCMD::CTRL_INPUT_ONBOARD) {
+      processInputSource();
+    }
+    if (state_.ctrl_input_state == DCMD::CTRL_INPUT_ONBOARD) {
+      handleOnboardCommand(cmd);
+    }
+  }
+
+  void onImuData(const sensor_msgs::msg::Imu & imu)
+  {
+    state_.imu_data = imu;
+    last_flight_status_ts_ = this->now();
+  }
+
+  void onImuDataFused(const sensor_msgs::msg::Imu & imu)
+  {
+    auto quat = Eigen::Quaterniond(imu.orientation.w,
+                                   imu.orientation.x,
+                                   imu.orientation.y,
+                                   imu.orientation.z);
+    auto q_ned = ENU2NED(quat);
+    Eigen::Vector3d rpy = quat2eulers(q_ned);
+    yaw_fc_ = rpy.z();
+    last_flight_status_ts_ = this->now();
+  }
+
+  // ==================== Control logic (like original) ====================
+  void processInputSource()
+  {
+    // If no input
+    if (state_.ctrl_input_state == DCMD::CTRL_INPUT_NONE) {
+      if (state_.rc_valid) {
+        state_.ctrl_input_state = DCMD::CTRL_INPUT_RC;
+        RCLCPP_INFO(this->get_logger(), "Change Source to RC");
+      } else if (state_.onboard_cmd_valid) {
+        state_.ctrl_input_state = DCMD::CTRL_INPUT_ONBOARD;
+        RCLCPP_INFO(this->get_logger(), "Change Source to Onboard because RC invalid but Onboard valid");
+      }
     }
 
-    //TODO: Generate command using rc
+    // If currently using RC
+    if (state_.ctrl_input_state == DCMD::CTRL_INPUT_RC) {
+      if (!state_.rc_valid) {
+        state_.ctrl_input_state = DCMD::CTRL_INPUT_NONE;
+        RCLCPP_INFO(this->get_logger(), "Change Source to None because RC Failure");
+        if (state_.onboard_cmd_valid) {
+          state_.ctrl_input_state = DCMD::CTRL_INPUT_ONBOARD;
+          RCLCPP_INFO(this->get_logger(), "Change Source to Onboard because RC Failure but Onboard valid");
+        }
+      } else if (rcRequestOnboard() && state_.onboard_cmd_valid) {
+        state_.ctrl_input_state = DCMD::CTRL_INPUT_ONBOARD;
+        RCLCPP_INFO(this->get_logger(), "Change Source to Onboard because RC request & Onboard valid");
+      }
+    }
+
+    // If currently using Onboard
+    if (state_.ctrl_input_state == DCMD::CTRL_INPUT_ONBOARD) {
+      if (!state_.onboard_cmd_valid) {
+        if (state_.rc_valid) {
+          state_.ctrl_input_state = DCMD::CTRL_INPUT_RC;
+          RCLCPP_INFO(this->get_logger(), "Onboard invalid => switch to RC");
+        } else {
+          state_.ctrl_input_state = DCMD::CTRL_INPUT_NONE;
+          RCLCPP_INFO(this->get_logger(), "Onboard invalid => switch to None");
+        }
+      }
+    }
+
+    switch (state_.ctrl_input_state) {
+      case DCMD::CTRL_INPUT_RC:
+        processRcInput();
+        break;
+      case DCMD::CTRL_INPUT_ONBOARD:
+        processOnboardInput();
+        break;
+      default:
+      case DCMD::CTRL_INPUT_NONE:
+        processNoneInput();
+        break;
+    }
+  }
+
+  void processRcInput()
+  {
+    if (state_.control_auth != DCMD::CTRL_AUTH_THIS && !param_.is_px4) {
+      state_.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+      return;
+    }
+    if (rcMovingStick()) {
+      requestCtrlMode(DCMD::CTRL_MODE_POSVEL);
+    } else {
+      if (state_.commander_ctrl_mode != DCMD::CTRL_MODE_MISSION &&
+          state_.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF &&
+          state_.commander_ctrl_mode != DCMD::CTRL_MODE_LANDING) {
+        requestCtrlMode(DCMD::CTRL_MODE_HOVER);
+      }
+    }
+
     double y = 0;
     double x = 0;
     double r = 0;
     double z = 0;
-
-    if (state.rc_valid) {
-        y = - superexpo((rc.axes[0] - PWM_CENTER)/PWM_100);
-        x = superexpo((rc.axes[1] - PWM_CENTER)/PWM_100);
-        z = superexpo((rc.axes[2] - PWM_CENTER)/PWM_100);
-        r = superexpo((rc.axes[3] - PWM_CENTER)/PWM_100);
+    if (state_.rc_valid) {
+      // rc_.axes[0..3] presumably: roll, pitch, thrust, yaw
+      y = - superexpo((rc_.axes[0] - PWM_CENTER)/PWM_100);
+      x =   superexpo((rc_.axes[1] - PWM_CENTER)/PWM_100);
+      z =   superexpo((rc_.axes[2] - PWM_CENTER)/PWM_100);
+      r =   superexpo((rc_.axes[3] - PWM_CENTER)/PWM_100);
     }
 
+    switch (state_.commander_ctrl_mode) {
+      case DCMD::CTRL_MODE_POSVEL:
+      {
+        ctrl_cmd_->yaw_sp = constrainAngle(ctrl_cmd_->yaw_sp + r * RC_MAX_YAW_RATE * LOOP_DURATION);
+        double vxd = x * RC_MAX_TILT_VEL;
+        double vyd = y * RC_MAX_TILT_VEL;
 
-    switch (state.commander_ctrl_mode) {
-        case DCMD::CTRL_MODE_POSVEL: {
-            ctrl_cmd->yaw_sp =  constrainAngle(ctrl_cmd->yaw_sp + r * RC_MAX_YAW_RATE * LOOP_DURATION);
-            double vxd = x * RC_MAX_TILT_VEL;
-            double vyd = y * RC_MAX_TILT_VEL;
+        // transform to ENU => NED or vice versa
+        ctrl_cmd_->vel_sp.x =  vxd * std::cos(yaw_vo_) + vyd * std::sin(yaw_vo_);
+        ctrl_cmd_->vel_sp.y = -vxd * std::sin(yaw_vo_) + vyd * std::cos(yaw_vo_);
+        ctrl_cmd_->vel_sp.z =  z * RC_MAX_Z_VEL;
 
-            ctrl_cmd->vel_sp.x = vxd * cos(yaw_vo) + vyd*sin(yaw_vo);
-            ctrl_cmd->vel_sp.y = -vxd * sin(yaw_vo) + vyd*cos(yaw_vo);
-            ctrl_cmd->vel_sp.z = z * RC_MAX_Z_VEL;
-
-            if (!pos_sp_inited) {
-                ctrl_cmd->pos_sp.x = odometry.pose.pose.position.x;
-                ctrl_cmd->pos_sp.y = odometry.pose.pose.position.y;
-                ctrl_cmd->pos_sp.z = odometry.pose.pose.position.z;
-                pos_sp_inited = true;
-                reset_yaw_sp();
-            }
-
-            if (state.is_armed && state.control_auth == DCMD::CTRL_AUTH_THIS) { 
-                if(state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) {
-                    ctrl_cmd->pos_sp.x = ctrl_cmd->pos_sp.x + ctrl_cmd->vel_sp.x * LOOP_DURATION;
-                    ctrl_cmd->pos_sp.y = ctrl_cmd->pos_sp.y + ctrl_cmd->vel_sp.y * LOOP_DURATION;
-                    ctrl_cmd->pos_sp.z = ctrl_cmd->pos_sp.z + ctrl_cmd->vel_sp.z * LOOP_DURATION;
-                    ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_POS_MODE;
-                } else {
-                    ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_VEL_MODE;
-                    pos_sp_inited = false;
-                }
-            } else {
-                ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
-                pos_sp_inited = false;
-            }
-
-
-            break;
+        if (!pos_sp_inited_) {
+          ctrl_cmd_->pos_sp.x = odometry_.pose.pose.position.x;
+          ctrl_cmd_->pos_sp.y = odometry_.pose.pose.position.y;
+          ctrl_cmd_->pos_sp.z = odometry_.pose.pose.position.z;
+          pos_sp_inited_ = true;
+          resetYawSp();
         }
 
-        case DCMD::CTRL_MODE_TAKEOFF: 
-        case DCMD::CTRL_MODE_LANDING:
-        case DCMD::CTRL_MODE_MISSION:
-            break;        
-        case DCMD::CTRL_MODE_HOVER:
-            prepare_control_hover();
-            break;
-
-        case DCMD::CTRL_MODE_IDLE:        
-        case DCMD::CTRL_MODE_ATT:
-        case DCMD::CTRL_MODE_ALT:
-        default: {
-            reset_yaw_sp();
-            set_att_setpoint(-y* RC_MAX_TILT_ANGLE, -x * RC_MAX_TILT_ANGLE,  r * RC_MAX_YAW_RATE, z, true, true, true);
-            break;
-        }
-    }
-
-
-}
-
-void DroneCommander::process_none_input () {
-    if (state.commander_ctrl_mode != DCMD::CTRL_MODE_MISSION &&
-        state.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF &&
-        state.commander_ctrl_mode != DCMD::CTRL_MODE_LANDING) {
-        //When no input and not takeoff and not landing, turn to hover
-        request_ctrl_mode(DCMD::CTRL_MODE_HOVER);
-    }
-}
-
-void DroneCommander::process_control_idle() {
-    //Well in IDLE mode for PX4 we need to send some empty command
-    set_att_setpoint(0, 0, 0, 0, false);
-    bool is_cmd_valid = true;
-    if (is_cmd_valid)
-    {
-        send_ctrl_cmd();
-    } else {
-        ROS_ERROR("Att ctrl cmd invaild!");
-        //TODO:
-    }
-}
-
-void DroneCommander::process_onboard_input () {
-    if (rc_moving_stick()) {
-        state.onboard_cmd_valid = false;
-        state.ctrl_input_state = DCMD::CTRL_INPUT_RC;
-        ROS_INFO("Change Source to RC Due to RC moving stick");
-    }
-}
-
-void DroneCommander::process_control() {
-    //control_count ++;
-    if (state.control_auth != DCMD::CTRL_AUTH_THIS) {
-        if (state.commander_ctrl_mode == DCMD::CTRL_MODE_TAKEOFF) {
-            process_control_takeoff();
+        if (state_.is_armed && state_.control_auth == DCMD::CTRL_AUTH_THIS) {
+          if (state_.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) {
+            ctrl_cmd_->pos_sp.x += ctrl_cmd_->vel_sp.x * LOOP_DURATION;
+            ctrl_cmd_->pos_sp.y += ctrl_cmd_->vel_sp.y * LOOP_DURATION;
+            ctrl_cmd_->pos_sp.z += ctrl_cmd_->vel_sp.z * LOOP_DURATION;
+            ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_POS_MODE;
+          } else {
+            ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_VEL_MODE;
+            pos_sp_inited_ = false;
+          }
         } else {
-            state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+          ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
+          pos_sp_inited_ = false;
         }
-        return;
+        break;
+      }
+      case DCMD::CTRL_MODE_TAKEOFF:
+      case DCMD::CTRL_MODE_LANDING:
+      case DCMD::CTRL_MODE_MISSION:
+        break;
+      case DCMD::CTRL_MODE_HOVER:
+        prepareControlHover();
+        break;
+      case DCMD::CTRL_MODE_IDLE:
+      case DCMD::CTRL_MODE_ATT:
+      case DCMD::CTRL_MODE_ALT:
+      default:
+      {
+        resetYawSp();
+        setAttSetpoint(-y * RC_MAX_TILT_ANGLE, -x * RC_MAX_TILT_ANGLE, r * RC_MAX_YAW_RATE, z, true, true, true);
+        break;
+      }
     }
+  }
 
-    switch (state.commander_ctrl_mode) {
-        case DCMD::CTRL_MODE_HOVER:
-            prepare_control_hover();
-            process_control_posvel();
-            break;
-        case DCMD::CTRL_MODE_POSVEL:
-            process_control_posvel();
-            break;
-        case DCMD::CTRL_MODE_ATT:
-        case DCMD::CTRL_MODE_ALT:
-            process_control_att();
-            break;
-        case DCMD::CTRL_MODE_TAKEOFF:
-            process_control_takeoff();
-            break;
-        case DCMD::CTRL_MODE_LANDING:
-            process_control_landing();
-            break;
-        case DCMD::CTRL_MODE_MISSION:
-            process_control_mission();
-            break;
-        
-        case DCMD::CTRL_MODE_IDLE:
-        default:
-            process_control_idle();
-            break;
+  void processOnboardInput()
+  {
+    if (rcMovingStick()) {
+      state_.onboard_cmd_valid = false;
+      state_.ctrl_input_state = DCMD::CTRL_INPUT_RC;
+      RCLCPP_INFO(this->get_logger(), "Change Source to RC due to RC moving stick");
     }
-}
-void DroneCommander::process_control_posvel () {
-    // Check command first
+  }
+
+  void processNoneInput()
+  {
+    if (state_.commander_ctrl_mode != DCMD::CTRL_MODE_MISSION &&
+        state_.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF &&
+        state_.commander_ctrl_mode != DCMD::CTRL_MODE_LANDING) {
+      requestCtrlMode(DCMD::CTRL_MODE_HOVER);
+    }
+  }
+
+  void processControl()
+  {
+    if (state_.control_auth != DCMD::CTRL_AUTH_THIS) {
+      if (state_.commander_ctrl_mode == DCMD::CTRL_MODE_TAKEOFF) {
+        processControlTakeoff();
+      } else {
+        state_.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+      }
+      return;
+    }
+    switch (state_.commander_ctrl_mode) {
+      case DCMD::CTRL_MODE_HOVER:
+        prepareControlHover();
+        processControlPosvel();
+        break;
+      case DCMD::CTRL_MODE_POSVEL:
+        processControlPosvel();
+        break;
+      case DCMD::CTRL_MODE_ATT:
+      case DCMD::CTRL_MODE_ALT:
+        processControlAtt();
+        break;
+      case DCMD::CTRL_MODE_TAKEOFF:
+        processControlTakeoff();
+        break;
+      case DCMD::CTRL_MODE_LANDING:
+        processControlLanding();
+        break;
+      case DCMD::CTRL_MODE_MISSION:
+        processControlMission();
+        break;
+      case DCMD::CTRL_MODE_IDLE:
+      default:
+        processControlIdle();
+        break;
+    }
+  }
+
+  void processControlIdle()
+  {
+    setAttSetpoint(0, 0, 0, 0, false);
+    sendCtrlCmd();
+  }
+
+  void processControlPosvel()
+  {
     bool is_cmd_valid = true;
-    if (is_cmd_valid)
-    {
-        send_ctrl_cmd();
+    if (is_cmd_valid) {
+      sendCtrlCmd();
     } else {
-        ROS_ERROR("POSVEL Ctrl cmd invaild!");
-        //TODO:
-        // ctrl_cmd_pub.publish(*ctrl_cmd);
+      RCLCPP_ERROR(this->get_logger(), "POSVEL control cmd invalid!");
     }
+  }
 
-}
-
-void DroneCommander::process_control_att() {
+  void processControlAtt()
+  {
     bool is_cmd_valid = true;
-    if (is_cmd_valid)
-    {
-        send_ctrl_cmd();
+    if (is_cmd_valid) {
+      sendCtrlCmd();
     } else {
-        ROS_ERROR("Att ctrl cmd invaild!");
-        //TODO:
+      RCLCPP_ERROR(this->get_logger(), "Attitude control cmd invalid!");
     }
-}
+  }
 
-void DroneCommander::process_control_takeoff() {
-    //TODO: write takeoff scirpt
-    bool is_in_air = state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR;
+  void processControlTakeoff()
+  {
+    bool is_in_air = (state_.flight_status == DCMD::FLIGHT_STATUS_IN_AIR);
     bool is_takeoff_finish = false;
-    auto pos = odometry.pose.pose.position;
-    if (!state.vo_valid) {
-        takeoff_inited = false;
-        request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
-        return;
+    auto pos = odometry_.pose.pose.position;
+    if (!state_.vo_valid) {
+      takeoff_inited_ = false;
+      requestCtrlMode(DCMD::CTRL_MODE_LANDING);
+      return;
+    }
+    if (!takeoff_inited_) {
+      if (is_in_air && pos.z > MIN_TAKEOFF_HEIGHT) {
+        RCLCPP_INFO(this->get_logger(), "Already in air");
+        is_takeoff_finish = true;
+      }
+      takeoff_inited_ = true;
+      if (state_.vo_valid) {
+        takeoff_origin_.x() = pos.x;
+        takeoff_origin_.y() = pos.y;
+        takeoff_origin_.z() = pos.z;
+        RCLCPP_INFO(this->get_logger(), "Initing takeoff, origin: %.2f %.2f %.2f",
+                    takeoff_origin_.x(), takeoff_origin_.y(), takeoff_origin_.z());
+      }
+    }
+    if (!state_.is_armed) {
+      RCLCPP_INFO(this->get_logger(), "Trying to takeoff but not armed => tryArm(true)");
+      tryArm(true);
     }
 
-    if (!takeoff_inited) {
-        if (state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR && pos.z > MIN_TAKEOFF_HEIGHT) {
-            ROS_INFO("Already in air");
-            is_takeoff_finish = true;
-        }
-        takeoff_inited = true;
-        if (state.vo_valid) {
-            takeoff_origin.x() = odometry.pose.pose.position.x;
-            takeoff_origin.y() = odometry.pose.pose.position.y;
-            takeoff_origin.z() = odometry.pose.pose.position.z;
-            ROS_INFO("Initing takeoff, origin place is %3.2lf %3.2lf %3.2lf", takeoff_origin.x(), takeoff_origin.y(), takeoff_origin.z());
-        } else {
-            ROS_INFO("Initing takeoff, no vo");
-        }
-    }
-
-    if (!state.is_armed) {
-        ROS_INFO("Trying to takeoff but not armed. Try arm");
-        try_arm(true);
-    }
-
-    if (state.vo_valid) {
-        if (fabs(pos.x - takeoff_origin.x()) < MAX_AUTO_TILT_ERROR && 
-            fabs(pos.y - takeoff_origin.y()) < MAX_AUTO_TILT_ERROR && 
-            fabs(pos.z - (takeoff_origin.z() + state.takeoff_target_height)) < MAX_AUTO_Z_ERROR) {
-            is_takeoff_finish = true;
-            ROS_INFO("Takeoff finish");
-        } else {
-            is_takeoff_finish = false;
-        }
+    if (state_.vo_valid) {
+      double z_err = std::fabs(pos.z - (takeoff_origin_.z() + state_.takeoff_target_height));
+      if (z_err < MAX_AUTO_Z_ERROR && 
+          std::fabs(pos.x - takeoff_origin_.x()) < MAX_AUTO_TILT_ERROR &&
+          std::fabs(pos.y - takeoff_origin_.y()) < MAX_AUTO_TILT_ERROR) {
+        is_takeoff_finish = true;
+        RCLCPP_INFO(this->get_logger(), "Takeoff finish");
+      }
     } else {
-        is_takeoff_finish = is_in_air;
+      is_takeoff_finish = is_in_air;
     }
 
     if (is_takeoff_finish) {
-        ROS_INFO("Finish takeoff, turn to hover....");
-        request_ctrl_mode(DCMD::CTRL_MODE_HOVER);
-        if (state.commander_ctrl_mode == DCMD::CTRL_MODE_HOVER) {
-            ROS_INFO("Takeof trans to hover mode, will hover at %3.2f %3.2f %3.2f....", takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
-            set_hover_target_position(
-                takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z()
-            );
-        }
-
-        takeoff_inited = false;
-        reset_ctrl_cmd_max_vel();
-        return;
-    }
-    if (state.vo_valid) {
-        if (is_in_air || (pos.z - takeoff_origin.z() > MIN_TAKEOFF_HEIGHT)) {
-            //Already in air, process as a  posvel control
-            ctrl_cmd->max_vel.z = state.takeoff_velocity;
-            set_pos_setpoint(takeoff_origin.x(), takeoff_origin.y(), state.takeoff_target_height + takeoff_origin.z());
-        } else {
-            set_vel_setpoint(0, 0, state.takeoff_velocity);
-            // set_att_setpoint(0, 0, yaw_vo, state.takeoff_velocity, true, false);    
-        }
+      RCLCPP_INFO(this->get_logger(), "Finish takeoff, switch to HOVER");
+      requestCtrlMode(DCMD::CTRL_MODE_HOVER);
+      if (state_.commander_ctrl_mode == DCMD::CTRL_MODE_HOVER) {
+        setHoverTargetPosition(takeoff_origin_.x(),
+                               takeoff_origin_.y(),
+                               state_.takeoff_target_height + takeoff_origin_.z());
+      }
+      takeoff_inited_ = false;
+      resetCtrlCmdMaxVel();
+      return;
     }
 
-    send_ctrl_cmd();
-}
-
-bool DroneCommander::request_drone_landing() {
-    mavros_msgs::CommandTOL srv;
-    srv.request.altitude = 0;
-    srv.request.latitude = 0;
-    srv.request.longitude = 0;
-    srv.request.yaw = yaw_fc;
-    if (drone_landing_control.call(srv)) {
-        if (srv.response.success) {
-            ROS_INFO("Using Mavros Landing success....");
-            in_fc_landing = true;
-            return true;
-        }
+    // Not finished yet
+    if (is_in_air || (pos.z - takeoff_origin_.z() > MIN_TAKEOFF_HEIGHT)) {
+      ctrl_cmd_->max_vel.z = state_.takeoff_velocity;
+      setPosSetpoint(takeoff_origin_.x(),
+                     takeoff_origin_.y(),
+                     state_.takeoff_target_height + takeoff_origin_.z());
+    } else {
+      setVelSetpoint(0, 0, state_.takeoff_velocity);
     }
-    return false;
-}
+    sendCtrlCmd();
+  }
 
-void DroneCommander::process_control_landing() {
-    bool is_landing_finish = state.flight_status < DCMD::FLIGHT_STATUS_IN_AIR;
-
-    // if acc.z > 12 (9.8 + 2.) stop
-
+  void processControlLanding()
+  {
+    bool is_landing_finish = (state_.flight_status < DCMD::FLIGHT_STATUS_IN_AIR);
     if (is_landing_finish) {
-        ROS_INFO("Landing finish; try disarm...");
-        is_landing_tail = false;
-        is_touch_ground = true;
-
-        this->try_arm(false);
-        if (!state.is_armed) {
-            request_ctrl_mode(DCMD::CTRL_MODE_IDLE);
-            ROS_INFO("Finsh landing, turn to IDLE");
-        }
-        return;
+      RCLCPP_INFO(this->get_logger(), "Landing finished => disarm");
+      is_landing_tail_ = false;
+      is_touch_ground_ = true;
+      tryArm(false);
+      if (!state_.is_armed) {
+        requestCtrlMode(DCMD::CTRL_MODE_IDLE);
+        RCLCPP_INFO(this->get_logger(), "Landing done => IDLE");
+      }
+      return;
     }
-
-    if (state.imu_data.linear_acceleration.z > 15.0) {
-        ROS_INFO("Detect touching ground, is_touch_ground to TRUE");
-        is_touch_ground = true;
+    // Check for IMU-based ground contact?
+    if (state_.imu_data.linear_acceleration.z > 15.0) {
+      RCLCPP_INFO(this->get_logger(), "Detect ground contact => is_touch_ground_=true");
+      is_touch_ground_ = true;
     }
-
-    if (is_landing_tail) {
-        // ROS_INFO("Is landing tail....");
-        if (is_touch_ground) {
-            ROS_INFO("Touch ground, thrust set to zero");
-            //Actually thrust protection will only keep thrust at a low value but not 0. 0.0 is just for convenience
-            set_att_setpoint(0, 0, yaw_vo, 0.0, false, false);
-            is_landing_finish = true;
-        }
-        else {
-            set_att_setpoint(0, 0, yaw_vo, param.landing_thrust, false, false);
-        }
-        send_ctrl_cmd();
+    if (is_landing_tail_) {
+      if (is_touch_ground_) {
+        RCLCPP_INFO(this->get_logger(), "Touch ground, thrust=0.0");
+        setAttSetpoint(0, 0, yaw_vo_, 0.0, false, false);
+        is_landing_finish = true;
+      } else {
+        setAttSetpoint(0, 0, yaw_vo_, param_.landing_thrust, false, false);
+      }
+      sendCtrlCmd();
     } else {
-        if (state.vo_valid && state.landing_mode == DCMD::LANDING_MODE_XYVEL) {
-            if (state.pos.z > LANDING_ATT_MODE_HEIGHT) {
-                set_vel_setpoint(0, 0, state.landing_velocity);
-                // set_pos_setpoint(state.pos.x, state.pos.y, state.pos.z, NAN, 0.0, 0.0, state.landing_velocity);
-            } else {
-                ROS_INFO("battery is: %f", state.bat_vol);
-                printf("landing_thrust is: %f", param.landing_thrust);
-                is_landing_tail = true;
-                set_att_setpoint(0, 0, yaw_vo, state.landing_velocity, true, false);
-                /*
-                bool res = request_drone_landing();
-                if (!res) {
-                    state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
-                    ROS_ERROR("Can't landing with dji; emergency landing instead");
-                    set_att_setpoint(0, 0, yaw_vo, LANDING_VEL_Z_EMERGENCY, true, false);
-                    state.landing_mode = DCMD::LANDING_MODE_ATT;
-                }*/
-            }
-
+      // Normal XY velocity landing
+      if (state_.vo_valid && (state_.landing_mode == DCMD::LANDING_MODE_XYVEL)) {
+        if (state_.pos.z > LANDING_ATT_MODE_HEIGHT) {
+          setVelSetpoint(0, 0, state_.landing_velocity);
         } else {
-            set_att_setpoint(0, 0, yaw_vo, param.landing_thrust, false, false);
+          RCLCPP_INFO(this->get_logger(), "Switching to attitude landing tail-mode");
+          is_landing_tail_ = true;
+          setAttSetpoint(0, 0, yaw_vo_, state_.landing_velocity, true, false);
         }
-        send_ctrl_cmd();
+      } else {
+        setAttSetpoint(0, 0, yaw_vo_, param_.landing_thrust, false, false);
+      }
+      sendCtrlCmd();
     }
+  }
 
+  void processControlMission()
+  {
+    // Not fully implemented
+    // ...
+    sendCtrlCmd();
+  }
 
-}
-
-void DroneCommander::request_ctrl_mode(uint32_t req_ctrl_mode) {
-    // ROS_INFO("Request %d", req_ctrl_mode);
-    switch (req_ctrl_mode) {
-        case DCMD::CTRL_MODE_LANDING: {
-            if (state.flight_status < state.FLIGHT_STATUS_ARMED) {
-                state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
-            } else {
-                state.commander_ctrl_mode = req_ctrl_mode;
-            }
-            return;
-            break;
+  void requestCtrlMode(uint32_t req_mode)
+  {
+    switch (req_mode) {
+      case DCMD::CTRL_MODE_LANDING:
+      {
+        if (state_.flight_status < DCMD::FLIGHT_STATUS_ARMED) {
+          state_.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+        } else {
+          state_.commander_ctrl_mode = req_mode;
         }
-
-        case DCMD::CTRL_MODE_TAKEOFF: {
-            if (state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR && state.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF && state.commander_ctrl_mode != DCMD::CTRL_MODE_LANDING) {
-                ROS_INFO("Directly hover in take-off");
-                request_ctrl_mode(DCMD::CTRL_MODE_HOVER);       
-            } else {
-                state.commander_ctrl_mode = req_ctrl_mode;
-            }
-            break;
-        }
-        case DCMD::CTRL_MODE_MISSION:
-        case DCMD::CTRL_MODE_HOVER:
-        case DCMD::CTRL_MODE_POSVEL:{
-            if (state.flight_status < state.FLIGHT_STATUS_IN_AIR) {
-                //Not in air; goto IDLE
-                state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
-            } else {
-                if (state.vo_valid) {
-                    state.commander_ctrl_mode = req_ctrl_mode;
-                } else {
-                    ROS_WARN("VO failed on MISSION/HOVER/POSVEL Mode and in Air. Will emergency landing now");
-                    state.commander_ctrl_mode = DCMD::CTRL_MODE_LANDING;
-                    state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
-                    return;
-                }
-            }
-            break;
-        }
-        case DCMD::CTRL_MODE_IDLE:
-            state.commander_ctrl_mode = req_ctrl_mode;
-            break;
-        
-        default:
-        case DCMD::CTRL_MODE_ALT:
-        case DCMD::CTRL_MODE_ATT: {
-            if (state.flight_status < state.FLIGHT_STATUS_IN_AIR) {
-                //Not in air; goto IDLE
-                state.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
-            } else {
-                state.commander_ctrl_mode = req_ctrl_mode;
-            }
-            
-            break;
-        }
-    }
-
-    if (state.ctrl_input_state == DCMD::CTRL_INPUT_NONE ) {
-        if (state.commander_ctrl_mode !=DCMD::CTRL_MODE_LANDING && state.commander_ctrl_mode !=DCMD::CTRL_MODE_TAKEOFF && state.commander_ctrl_mode != DCMD::CTRL_MODE_MISSION ) {
-            //If no command come in, what to do
-            //now is hover
-            if (req_ctrl_mode != DCMD::CTRL_MODE_HOVER)
-                request_ctrl_mode(DCMD::CTRL_MODE_HOVER);
-        }
-    }
-
-
-}
-
-void DroneCommander::process_control_mode() {
-    request_ctrl_mode(state.commander_ctrl_mode);
-
-}
-
-void DroneCommander::send_control_cmd_px4() {
-    if (!state.is_armed) {
         return;
-    }
-    mavros_msgs::PositionTarget pos_target;
-    pos_target.header.stamp = ros::Time::now();
-    pos_target.header.frame_id = "world";
-    pos_target.coordinate_frame = mavros_msgs::PositionTarget::FRAME_LOCAL_NED; //Note we send FLU
-    if (ctrl_cmd->ctrl_mode == DronePosCtrlCmd::CTRL_CMD_POS_MODE || 
-            ctrl_cmd->ctrl_mode == DronePosCtrlCmd::CTRL_CMD_VEL_MODE) {
-        auto vel_sp = ctrl_cmd->vel_sp;
-        auto acc_sp = ctrl_cmd->acc_sp;
-        if (ctrl_cmd->ctrl_mode == DronePosCtrlCmd::CTRL_CMD_POS_MODE) {
-            pos_target.position.x = ctrl_cmd->pos_sp.x;
-            pos_target.position.y = ctrl_cmd->pos_sp.y;
-            pos_target.position.z = ctrl_cmd->pos_sp.z;
-            if (fabs(vel_sp.x) < EPS && fabs(vel_sp.y) < EPS && fabs(vel_sp.z) < EPS ) {
-                pos_target.type_mask = mavros_msgs::PositionTarget::IGNORE_VX |
-                    mavros_msgs::PositionTarget::IGNORE_VY |
-                    mavros_msgs::PositionTarget::IGNORE_VZ;
-            }
+      }
+      case DCMD::CTRL_MODE_TAKEOFF:
+      {
+        if (state_.flight_status == DCMD::FLIGHT_STATUS_IN_AIR &&
+            state_.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF &&
+            state_.commander_ctrl_mode != DCMD::CTRL_MODE_LANDING)
+        {
+          RCLCPP_INFO(this->get_logger(), "Already in air => directly hover");
+          requestCtrlMode(DCMD::CTRL_MODE_HOVER);
         } else {
-            pos_target.type_mask = mavros_msgs::PositionTarget::IGNORE_PX |
-                                    mavros_msgs::PositionTarget::IGNORE_PY |
-                                    mavros_msgs::PositionTarget::IGNORE_PZ;
-            printf("Vel cmd %.2f %.2f %.2f\n", vel_sp.x, vel_sp.y, vel_sp.z);
+          state_.commander_ctrl_mode = req_mode;
         }
-
-        if (fabs(acc_sp.x) < EPS && fabs(acc_sp.y) < EPS && fabs(acc_sp.z) < EPS) {
-            pos_target.type_mask = mavros_msgs::PositionTarget::IGNORE_AFX |
-                mavros_msgs::PositionTarget::IGNORE_AFY |
-                mavros_msgs::PositionTarget::IGNORE_AFZ;
+        break;
+      }
+      case DCMD::CTRL_MODE_MISSION:
+      case DCMD::CTRL_MODE_HOVER:
+      case DCMD::CTRL_MODE_POSVEL:
+      {
+        if (state_.flight_status < DCMD::FLIGHT_STATUS_IN_AIR) {
+          state_.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+        } else {
+          if (state_.vo_valid) {
+            state_.commander_ctrl_mode = req_mode;
+          } else {
+            RCLCPP_WARN(this->get_logger(), "VO failed => emergency landing");
+            state_.commander_ctrl_mode = DCMD::CTRL_MODE_LANDING;
+            state_.landing_velocity = LANDING_VEL_Z_EMERGENCY;
+            return;
+          }
         }
-
-        pos_target.velocity = vel_sp;
-        pos_target.acceleration_or_force = acc_sp;
-        pos_target.yaw = ctrl_cmd->yaw_sp;
-        pos_target.yaw_rate = 0;
-        control_pos_vel_px4_pub.publish(pos_target);
-    } 
-    if (ctrl_cmd->ctrl_mode == DronePosCtrlCmd::CTRL_CMD_ATT_VELZ_MODE) {
-        //TODO
-        Vector3d acc_sp(0., 0., 9.8);
-        Quaterniond q_sp = Quaterniond(ctrl_cmd->att_sp.w, ctrl_cmd->att_sp.x, ctrl_cmd->att_sp.y, ctrl_cmd->att_sp.z);
-        acc_sp = q_sp.toRotationMatrix() * acc_sp;
-        pos_target.type_mask = mavros_msgs::PositionTarget::IGNORE_PX |
-                mavros_msgs::PositionTarget::IGNORE_PY |
-                mavros_msgs::PositionTarget::IGNORE_PZ |
-                mavros_msgs::PositionTarget::IGNORE_VX |
-                mavros_msgs::PositionTarget::IGNORE_VY;
-        pos_target.yaw = ctrl_cmd->yaw_sp;
-        pos_target.yaw_rate = 0;
-        pos_target.velocity.x = 0.0;
-        pos_target.velocity.y = 0.0;
-        pos_target.velocity.z = ctrl_cmd->z_sp;
-        pos_target.acceleration_or_force.x = acc_sp.x();
-        pos_target.acceleration_or_force.y = acc_sp.y();
-        pos_target.acceleration_or_force.z = 0.0;
-        control_pos_vel_px4_pub.publish(pos_target);
-    } else if (ctrl_cmd->ctrl_mode == DronePosCtrlCmd::CTRL_CMD_ATT_THRUST_MODE) {
-        mavros_msgs::AttitudeTarget att_target;
-        att_target.header.stamp = ros::Time::now();
-        att_target.header.frame_id = "world";
-        att_target.type_mask = mavros_msgs::AttitudeTarget::IGNORE_ROLL_RATE |
-                                mavros_msgs::AttitudeTarget::IGNORE_PITCH_RATE |
-                                mavros_msgs::AttitudeTarget::IGNORE_YAW_RATE;
-        att_target.orientation = ctrl_cmd->att_sp;
-        att_target.thrust = ctrl_cmd->z_sp;
-        control_att_pub.publish(att_target);
+        break;
+      }
+      case DCMD::CTRL_MODE_IDLE:
+        state_.commander_ctrl_mode = req_mode;
+        break;
+      default:
+      case DCMD::CTRL_MODE_ALT:
+      case DCMD::CTRL_MODE_ATT:
+      {
+        if (state_.flight_status < DCMD::FLIGHT_STATUS_IN_AIR) {
+          state_.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
+        } else {
+          state_.commander_ctrl_mode = req_mode;
+        }
+        break;
+      }
     }
-}
 
-void DroneCommander::send_ctrl_cmd() {
-    if (ctrl_cmd->ctrl_mode != DPCL::CTRL_CMD_POS_MODE) {
-        pos_sp_inited = false;
+    if (state_.ctrl_input_state == DCMD::CTRL_INPUT_NONE) {
+      if (state_.commander_ctrl_mode != DCMD::CTRL_MODE_LANDING &&
+          state_.commander_ctrl_mode != DCMD::CTRL_MODE_TAKEOFF &&
+          state_.commander_ctrl_mode != DCMD::CTRL_MODE_MISSION)
+      {
+        if (req_mode != DCMD::CTRL_MODE_HOVER) {
+          requestCtrlMode(DCMD::CTRL_MODE_HOVER);
+        }
+      }
     }
-    if (param.use_px4_pos_ctrl)
+  }
+
+  void processControlMode()
+  {
+    requestCtrlMode(state_.commander_ctrl_mode);
+  }
+
+  // ==================== Send Commands ====================
+  void sendControlCmdPX4()
+  {
+    if (!state_.is_armed) {
+      return;
+    }
+    mavros_msgs::msg::PositionTarget pos_target;
+    pos_target.header.stamp = this->now();
+    pos_target.header.frame_id = "world";
+    pos_target.coordinate_frame = mavros_msgs::msg::PositionTarget::FRAME_LOCAL_NED;
+
+    if ((ctrl_cmd_->ctrl_mode == DPCL::CTRL_CMD_POS_MODE) ||
+        (ctrl_cmd_->ctrl_mode == DPCL::CTRL_CMD_VEL_MODE))
     {
-        send_control_cmd_px4();
-    }
-    else
-    {
-        if (!state.is_armed || state.control_auth != DCMD::CTRL_AUTH_THIS) {
-            ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
-        }
-        ctrl_cmd_pub.publish(*ctrl_cmd);
-    }
-}
+      auto & vel_sp = ctrl_cmd_->vel_sp;
+      auto & acc_sp = ctrl_cmd_->acc_sp;
 
-bool DroneCommander::set_hover_target_position(double x, double y, double z) {
-    if (state.is_armed && state.vo_valid && state.flight_status == DCMD::FLIGHT_STATUS_IN_AIR && state.control_auth == DCMD::CTRL_AUTH_THIS) {
-        hover_pos = Eigen::Vector3d(x, y, z);
-        set_pos_setpoint(x, y, z);
-        last_hover_count = control_count;
-        return true;
+      if (ctrl_cmd_->ctrl_mode == DPCL::CTRL_CMD_POS_MODE) {
+        pos_target.position.x = ctrl_cmd_->pos_sp.x;
+        pos_target.position.y = ctrl_cmd_->pos_sp.y;
+        pos_target.position.z = ctrl_cmd_->pos_sp.z;
+        if (std::fabs(vel_sp.x) < EPS && std::fabs(vel_sp.y) < EPS && std::fabs(vel_sp.z) < EPS) {
+          pos_target.type_mask |= mavros_msgs::msg::PositionTarget::IGNORE_VX |
+                                  mavros_msgs::msg::PositionTarget::IGNORE_VY |
+                                  mavros_msgs::msg::PositionTarget::IGNORE_VZ;
+        }
+      } else {
+        pos_target.type_mask |= mavros_msgs::msg::PositionTarget::IGNORE_PX |
+                                mavros_msgs::msg::PositionTarget::IGNORE_PY |
+                                mavros_msgs::msg::PositionTarget::IGNORE_PZ;
+      }
+
+      if (std::fabs(acc_sp.x) < EPS && std::fabs(acc_sp.y) < EPS && std::fabs(acc_sp.z) < EPS) {
+        pos_target.type_mask |= mavros_msgs::msg::PositionTarget::IGNORE_AFX |
+                                mavros_msgs::msg::PositionTarget::IGNORE_AFY |
+                                mavros_msgs::msg::PositionTarget::IGNORE_AFZ;
+      }
+      pos_target.velocity = vel_sp;
+      pos_target.acceleration_or_force = acc_sp;
+      pos_target.yaw = ctrl_cmd_->yaw_sp;
+      pos_target.yaw_rate = 0;
+      control_pos_vel_px4_pub_->publish(pos_target);
+    }
+
+    if (ctrl_cmd_->ctrl_mode == DPCL::CTRL_CMD_ATT_VELZ_MODE) {
+      Eigen::Vector3d acc_sp(0.0, 0.0, 9.8);
+      Eigen::Quaterniond q_sp(ctrl_cmd_->att_sp.w,
+                              ctrl_cmd_->att_sp.x,
+                              ctrl_cmd_->att_sp.y,
+                              ctrl_cmd_->att_sp.z);
+      acc_sp = q_sp.toRotationMatrix() * acc_sp;
+
+      pos_target.type_mask = mavros_msgs::msg::PositionTarget::IGNORE_PX |
+                             mavros_msgs::msg::PositionTarget::IGNORE_PY |
+                             mavros_msgs::msg::PositionTarget::IGNORE_PZ |
+                             mavros_msgs::msg::PositionTarget::IGNORE_VX |
+                             mavros_msgs::msg::PositionTarget::IGNORE_VY;
+      pos_target.velocity.x = 0.0;
+      pos_target.velocity.y = 0.0;
+      pos_target.velocity.z = ctrl_cmd_->z_sp;
+      pos_target.acceleration_or_force.x = acc_sp.x();
+      pos_target.acceleration_or_force.y = acc_sp.y();
+      pos_target.acceleration_or_force.z = 0.0;
+      pos_target.yaw = ctrl_cmd_->yaw_sp;
+      pos_target.yaw_rate = 0;
+      control_pos_vel_px4_pub_->publish(pos_target);
+    } else if (ctrl_cmd_->ctrl_mode == DPCL::CTRL_CMD_ATT_THRUST_MODE) {
+      mavros_msgs::msg::AttitudeTarget att_target;
+      att_target.header.stamp = this->now();
+      att_target.header.frame_id = "world";
+      att_target.type_mask = mavros_msgs::msg::AttitudeTarget::IGNORE_ROLL_RATE |
+                             mavros_msgs::msg::AttitudeTarget::IGNORE_PITCH_RATE |
+                             mavros_msgs::msg::AttitudeTarget::IGNORE_YAW_RATE;
+      att_target.orientation = ctrl_cmd_->att_sp;
+      att_target.thrust = ctrl_cmd_->z_sp;
+      control_att_pub_->publish(att_target);
+    }
+  }
+
+  void sendCtrlCmd()
+  {
+    if (ctrl_cmd_->ctrl_mode != DPCL::CTRL_CMD_POS_MODE) {
+      pos_sp_inited_ = false;
+    }
+    if (param_.use_px4_pos_ctrl) {
+      sendControlCmdPX4();
+    } else {
+      if (!state_.is_armed || state_.control_auth != DCMD::CTRL_AUTH_THIS) {
+        ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
+      }
+      ctrl_cmd_pub_->publish(*ctrl_cmd_);
+    }
+  }
+
+  // ==================== Internal utility ====================
+  bool setHoverTargetPosition(double x, double y, double z)
+  {
+    if (state_.is_armed && state_.vo_valid && 
+        (state_.flight_status == DCMD::FLIGHT_STATUS_IN_AIR) &&
+        (state_.control_auth == DCMD::CTRL_AUTH_THIS))
+    {
+      hover_pos_ = Eigen::Vector3d(x, y, z);
+      setPosSetpoint(x, y, z);
+      last_hover_count_ = control_count_;
+      return true;
     }
     return false;
-}
+  }
 
-void DroneCommander::prepare_control_hover() {
+  void prepareControlHover()
+  {
     bool fail_to_hover = false;
-    if (last_hover_count < control_count - 1 && state.is_armed && state.vo_valid) {
-        //Need to start new hover
-        if (fabs(odometry.twist.twist.linear.x) > DANGER_SPEED_HOVER ||
-            fabs(odometry.twist.twist.linear.y) > DANGER_SPEED_HOVER ||
-            fabs(odometry.twist.twist.linear.z) > DANGER_SPEED_HOVER) {
-            fail_to_hover = true;
+    if (last_hover_count_ < control_count_ - 1 && state_.is_armed && state_.vo_valid) {
+      // Need to start a new hover
+      auto vx = odometry_.twist.twist.linear.x;
+      auto vy = odometry_.twist.twist.linear.y;
+      auto vz = odometry_.twist.twist.linear.z;
+      if (std::fabs(vx) > DANGER_SPEED_HOVER ||
+          std::fabs(vy) > DANGER_SPEED_HOVER ||
+          std::fabs(vz) > DANGER_SPEED_HOVER)
+      {
+        fail_to_hover = true;
+      } else {
+        bool succ = setHoverTargetPosition(odometry_.pose.pose.position.x,
+                                           odometry_.pose.pose.position.y,
+                                           odometry_.pose.pose.position.z);
+        if (succ) {
+          RCLCPP_INFO(this->get_logger(),
+            "Entering hover mode => hover @ %.2f %.2f %.2f, yaw_sp=%.2f deg",
+            hover_pos_.x(), hover_pos_.y(), hover_pos_.z(),
+            ctrl_cmd_->yaw_sp * 57.3
+          );
         } else {
-            bool succ = set_hover_target_position(
-                odometry.pose.pose.position.x, odometry.pose.pose.position.y, odometry.pose.pose.position.z);
-            if (succ) {
-                ROS_INFO("Entering hover mode, will hover at %3.2lf %3.2lf %3.2lf h %d c %d yaw_sp %3.2fdeg",
-                    hover_pos.x(),
-                    hover_pos.y(),
-                    hover_pos.z(),
-                    last_hover_count,
-                    control_count,
-                    ctrl_cmd->yaw_sp*57.3
-                );
-            } else {
-                fail_to_hover = true;
-            }
+          fail_to_hover = true;
         }
+      }
     }
-
     if (fail_to_hover) {
-        if (state.is_armed && state.control_auth == DCMD::CTRL_AUTH_THIS) {
-            ROS_INFO("Onboard trying to Landing because try to hover failed");
-            state.landing_mode = DCMD::LANDING_MODE_ATT;       
-            state.landing_velocity = LANDING_VEL_Z_EMERGENCY;
-            request_ctrl_mode(DCMD::CTRL_MODE_LANDING);
-        }
+      if (state_.is_armed && state_.control_auth == DCMD::CTRL_AUTH_THIS) {
+        RCLCPP_INFO(this->get_logger(), "Trying to hover failed => emergency landing");
+        state_.landing_mode = DCMD::LANDING_MODE_ATT;
+        state_.landing_velocity = LANDING_VEL_Z_EMERGENCY;
+        requestCtrlMode(DCMD::CTRL_MODE_LANDING);
+      }
     } else {
-        last_hover_count = control_count;
+      last_hover_count_ = control_count_;
     }
-}
+  }
 
+  void resetCtrlCmd()
+  {
+    pos_sp_inited_ = false;
+    last_hover_count_ = 0;
+    takeoff_inited_ = false;
+    ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
+    ctrl_cmd_->pos_sp.x = 0;
+    ctrl_cmd_->pos_sp.y = 0;
+    ctrl_cmd_->pos_sp.z = 0;
+    ctrl_cmd_->vel_sp.x = 0;
+    ctrl_cmd_->vel_sp.y = 0;
+    ctrl_cmd_->vel_sp.z = 0;
+    ctrl_cmd_->att_sp.w = 0;
+    ctrl_cmd_->att_sp.x = 0;
+    ctrl_cmd_->att_sp.y = 0;
+    ctrl_cmd_->att_sp.z = 0;
+    ctrl_cmd_->z_sp = 0;
+    resetCtrlCmdMaxVel();
+  }
 
-void DroneCommander::reset_ctrl_cmd() {
-    
-    pos_sp_inited = false;
-    last_hover_count = 0;
-    takeoff_inited = false;
-    ctrl_cmd->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
-    ctrl_cmd->pos_sp.x = 0;
-    ctrl_cmd->pos_sp.y = 0;
-    ctrl_cmd->pos_sp.z = 0;
+  void resetCtrlCmdMaxVel()
+  {
+    ctrl_cmd_->max_vel.x = DEFAULT_MAX_TITL_VEL;
+    ctrl_cmd_->max_vel.y = DEFAULT_MAX_TITL_VEL;
+    ctrl_cmd_->max_vel.z = DEFAULT_MAX_Z_VEL;
+  }
 
-    ctrl_cmd->vel_sp.x = 0;
-    ctrl_cmd->vel_sp.y = 0;
-    ctrl_cmd->vel_sp.z = 0;
-
-    ctrl_cmd->att_sp.w = 0;
-    ctrl_cmd->att_sp.x = 0;
-    ctrl_cmd->att_sp.y = 0;
-    ctrl_cmd->att_sp.z = 0;
-    
-    ctrl_cmd->z_sp = 0;
-
-    reset_ctrl_cmd_max_vel();
-    
-}
-
-void DroneCommander::reset_ctrl_cmd_max_vel() {
-    ctrl_cmd->max_vel.x = DEFAULT_MAX_TITL_VEL;
-    ctrl_cmd->max_vel.y = DEFAULT_MAX_TITL_VEL;
-    ctrl_cmd->max_vel.z = DEFAULT_MAX_Z_VEL;    
-}
-
-
-bool DroneCommander::is_odom_valid(const nav_msgs::Odometry & _odom) {
-    if ( fabs(_odom.twist.twist.linear.x) > MAX_ODOM_VELOCITY ||
-        fabs(_odom.twist.twist.linear.y) > MAX_ODOM_VELOCITY ||
-        fabs(_odom.twist.twist.linear.z) > MAX_ODOM_VELOCITY
-    )
+  bool isOdomValid(const nav_msgs::msg::Odometry & odom)
+  {
+    double vx = odom.twist.twist.linear.x;
+    double vy = odom.twist.twist.linear.y;
+    double vz = odom.twist.twist.linear.z;
+    if (std::fabs(vx) > MAX_ODOM_VELOCITY ||
+        std::fabs(vy) > MAX_ODOM_VELOCITY ||
+        std::fabs(vz) > MAX_ODOM_VELOCITY)
     {
-        return false;
+      return false;
     }
-
-    if ((ros::Time::now() - last_vo_image_ts).toSec() > param.max_vo_latency ) {
-        ROS_WARN_THROTTLE(1.0, "Latency on odom %3.1fms/%3.1fms! VO is not valid now.", 
-            (ros::Time::now() - last_vo_image_ts).toSec()*1000,
-            (ros::Time::now() - last_vo_ts).toSec()*1000
-            );
-        return false;
+    auto now_t = this->now();
+    if ((now_t - last_vo_image_ts_).seconds() > param_.max_vo_latency) {
+      return false;
     }
-
     return true;
-}
+  }
 
-bool DroneCommander::is_rc_valid(const sensor_msgs::Joy & _rc) {
-    return px4_fcu_state.manual_input;
-}
+  bool isRcValid(const sensor_msgs::msg::Joy & joy)
+  {
+    // In original code: `return px4_fcu_state.manual_input;`
+    // We don't store that here, so let's assume if we get JOY message => valid
+    return true;
+  }
 
-void DroneCommander::reset_yaw_sp() {
-    if (state.djisdk_valid) {
-        if (state.vo_valid) {
-            ctrl_cmd->yaw_sp = yaw_vo;
-        } else {
-            ctrl_cmd->yaw_sp = yaw_fc;
-        }
-        yaw_sp_inited = true;
+  void resetYawSp()
+  {
+    if (state_.djisdk_valid) {
+      if (state_.vo_valid) {
+        ctrl_cmd_->yaw_sp = yaw_vo_;
+      } else {
+        ctrl_cmd_->yaw_sp = yaw_fc_;
+      }
+      yaw_sp_inited_ = true;
     }
-}
+  }
 
-inline Eigen::Vector3d quat2eulers(Eigen::Quaterniond quat) {
-    Eigen::Vector3d rpy;
-    rpy.x() = atan2(2 * (quat.w() * quat.x() + quat.y() * quat.z()),
-                    1 - 2 * (quat.x() * quat.x() + quat.y() * quat.y()));
-    rpy.y() = asin(2 * (quat.w() * quat.y() - quat.z() * quat.x()));
-    rpy.z() = atan2(2 * (quat.w() * quat.z() + quat.x() * quat.y()),
-                    1 - 2 * (quat.y() * quat.y() + quat.z() * quat.z()));
-    return rpy;
-}
+  // ============ Setpoint methods =============
+  void setAttSetpoint(double roll, double pitch, double yawrate, double z,
+                      bool z_use_vel=true,
+                      bool yaw_use_rate=true,
+                      bool use_fc_yaw=false)
+  {
+    ctrl_cmd_->use_fc_yaw = use_fc_yaw;
+    if (yaw_use_rate) {
+      ctrl_cmd_->yaw_sp = constrainAngle(ctrl_cmd_->yaw_sp + yawrate * LOOP_DURATION);
+    } else {
+      ctrl_cmd_->yaw_sp = constrainAngle(yawrate);
+    }
+    Quaterniond quat_sp =
+      AngleAxisd(ctrl_cmd_->yaw_sp, Vector3d::UnitZ()) *
+      AngleAxisd(pitch, Vector3d::UnitY()) *
+      AngleAxisd(roll, Vector3d::UnitX());
+    ctrl_cmd_->att_sp.w = quat_sp.w();
+    ctrl_cmd_->att_sp.x = quat_sp.x();
+    ctrl_cmd_->att_sp.y = quat_sp.y();
+    ctrl_cmd_->att_sp.z = quat_sp.z();
+    ctrl_cmd_->z_sp = z;
+    if ((state_.is_armed && state_.control_auth == DCMD::CTRL_AUTH_THIS) || param_.is_px4) {
+      if (z_use_vel) {
+        ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_ATT_VELZ_MODE;
+      } else {
+        ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_ATT_THRUST_MODE;
+      }
+    } else {
+      ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
+    }
+  }
+
+  void setPosSetpoint(double x, double y, double z,
+                      double yaw = std::numeric_limits<double>::quiet_NaN(),
+                      double vx_ff = 0, double vy_ff = 0, double vz_ff = 0,
+                      double ax_ff = 0, double ay_ff = 0, double az_ff = 0)
+  {
+    ctrl_cmd_->pos_sp.x = x;
+    ctrl_cmd_->pos_sp.y = y;
+    ctrl_cmd_->pos_sp.z = z;
+    ctrl_cmd_->vel_sp.x = vx_ff;
+    ctrl_cmd_->vel_sp.y = vy_ff;
+    ctrl_cmd_->vel_sp.z = vz_ff;
+    ctrl_cmd_->acc_sp.x = ax_ff;
+    ctrl_cmd_->acc_sp.y = ay_ff;
+    ctrl_cmd_->acc_sp.z = az_ff;
+    ctrl_cmd_->use_fc_yaw = false;
+    if (!std::isnan(yaw)) {
+      ctrl_cmd_->yaw_sp = constrainAngle(yaw);
+    }
+    if ((state_.is_armed && state_.control_auth == DCMD::CTRL_AUTH_THIS) || param_.is_px4) {
+      ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_POS_MODE;
+    } else {
+      ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
+    }
+  }
+
+  void setVelSetpoint(double vx, double vy, double vz,
+                      double yaw = std::numeric_limits<double>::quiet_NaN(),
+                      double ax_ff = 0, double ay_ff = 0, double az_ff = 0)
+  {
+    ctrl_cmd_->vel_sp.x = vx;
+    ctrl_cmd_->vel_sp.y = vy;
+    ctrl_cmd_->vel_sp.z = vz;
+    ctrl_cmd_->acc_sp.x = ax_ff;
+    ctrl_cmd_->acc_sp.y = ay_ff;
+    ctrl_cmd_->acc_sp.z = az_ff;
+    if (!std::isnan(yaw)) {
+      ctrl_cmd_->yaw_sp = constrainAngle(yaw);
+    }
+    ctrl_cmd_->use_fc_yaw = false;
+    if ((state_.is_armed && state_.control_auth == DCMD::CTRL_AUTH_THIS) || param_.is_px4) {
+      ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_VEL_MODE;
+    } else {
+      ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
+    }
+  }
+
+  /**
+   * @brief Handling the OnboardCommand as in original code.
+   */
+  void handleOnboardCommand(const OCMD & _cmd)
+  {
+    switch (_cmd.command_type) {
+      case OCMD::CTRL_POS_COMMAND:
+      {
+        requestCtrlMode(DCMD::CTRL_MODE_POSVEL);
+        double x = ((double)_cmd.param1) / 10000.0;
+        double y = ((double)_cmd.param2) / 10000.0;
+        double z = ((double)_cmd.param3) / 10000.0;
+        double yaw = ((double)_cmd.param4) / 10000.0;
+        double vx_ff = ((double)_cmd.param5) / 10000.0;
+        double vy_ff = ((double)_cmd.param6) / 10000.0;
+        double vz_ff = ((double)_cmd.param7) / 10000.0;
+        double ax_ff = ((double)_cmd.param8) / 10000.0;
+        double ay_ff = ((double)_cmd.param9) / 10000.0;
+        double az_ff = ((double)_cmd.param10) / 10000.0;
+
+        if (_cmd.param4 == MAGIC_YAW_NAN) {
+          setPosSetpoint(x, y, z, NAN, vx_ff, vy_ff, vz_ff, ax_ff, ay_ff, az_ff);
+        } else {
+          setPosSetpoint(x, y, z, yaw, vx_ff, vy_ff, vz_ff, ax_ff, ay_ff, az_ff);
+        }
+        break;
+      }
+      case OCMD::CTRL_VEL_COMMAND:
+      {
+        requestCtrlMode(DCMD::CTRL_MODE_POSVEL);
+        double vx = ((double)_cmd.param1) / 10000.0;
+        double vy = ((double)_cmd.param2) / 10000.0;
+        double vz = ((double)_cmd.param3) / 10000.0;
+        double yaw = ((double)_cmd.param4) / 10000.0;
+        double ax_ff = ((double)_cmd.param5) / 10000.0;
+        double ay_ff = ((double)_cmd.param6) / 10000.0;
+        double az_ff = ((double)_cmd.param7) / 10000.0;
+
+        if (_cmd.param4 == MAGIC_YAW_NAN) {
+          // original code had a bug? We'll just setVelSetpoint
+          setVelSetpoint(vx, vy, vz, NAN, ax_ff, ay_ff, az_ff);
+        } else {
+          setVelSetpoint(vx, vy, vz, yaw, ax_ff, ay_ff, az_ff);
+        }
+        break;
+      }
+      case OCMD::CTRL_ATT_COMMAND:
+      {
+        requestCtrlMode(DCMD::CTRL_MODE_ATT);
+        double roll    = ((double)_cmd.param1) / 10000.0;
+        double pitch   = ((double)_cmd.param2) / 10000.0;
+        double yawrate = ((double)_cmd.param3) / 10000.0;
+        double z       = ((double)_cmd.param4) / 10000.0;
+        bool z_use_vel   = (_cmd.param5 == 0);
+        bool yaw_use_rate= (_cmd.param6 == 0);
+        setAttSetpoint(roll, pitch, yawrate, z, z_use_vel, yaw_use_rate);
+        break;
+      }
+      case OCMD::CTRL_MISSION_LOAD_COMMAND:
+      {
+        requestCtrlMode(DCMD::CTRL_MODE_MISSION);
+        break;
+      }
+      case OCMD::CTRL_MISSION_END_COMMAND:
+      {
+        requestCtrlMode(DCMD::CTRL_MODE_HOVER);
+        break;
+      }
+      case OCMD::CTRL_TAKEOF_COMMAND:
+      {
+        fail_arm_times_ = 0;
+        double h = ((double)_cmd.param1) / 10000.0;
+        if (h < MIN_TAKEOFF_HEIGHT) {
+          h = MIN_TAKEOFF_HEIGHT;
+        }
+        RCLCPP_INFO(this->get_logger(), "Onboard => TAKEOFF => target=%.2f", h);
+        requestCtrlMode(DCMD::CTRL_MODE_TAKEOFF);
+        state_.takeoff_target_height = h;
+        state_.takeoff_velocity = ((double)_cmd.param2) / 10000.0;
+        break;
+      }
+      case OCMD::CTRL_LANDING_COMMAND:
+      {
+        RCLCPP_INFO(this->get_logger(), "Onboard => LANDING");
+        if (_cmd.param1 < 0) {
+          state_.landing_mode = DCMD::LANDING_MODE_ATT;
+          is_landing_tail_ = true;
+        } else if (_cmd.param1 == 1) {
+          state_.landing_mode = DCMD::LANDING_MODE_ATT;
+        } else {
+          state_.landing_mode = DCMD::LANDING_MODE_XYVEL;
+          is_landing_tail_ = false;
+          is_touch_ground_ = false;
+        }
+        state_.landing_velocity = -((double)_cmd.param2) / 10000.0;
+        requestCtrlMode(DCMD::CTRL_MODE_LANDING);
+        break;
+      }
+      case OCMD::CTRL_HOVER_COMMAND:
+      {
+        requestCtrlMode(DCMD::CTRL_MODE_HOVER);
+        break;
+      }
+      case OCMD::CTRL_ARM_COMMAND:
+      {
+        fail_arm_times_ = 0;
+        RCLCPP_INFO(this->get_logger(), "Onboard => ARM=%d", _cmd.param1);
+        tryArm(_cmd.param1 > 0);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  bool rcRequestOnboard()
+  {
+    // In original code: (rc.axes[6] > 1800 && rc.axes[7] > 1800)
+    if (rc_.axes.size() > 7) {
+      return (rc_.axes[6] > 1800 && rc_.axes[7] > 1800);
+    }
+    return false;
+  }
+
+  bool rcRequestVo()
+  {
+    // In original code: (rc.axes[6] > 1800)
+    if (rc_.axes.size() > 6) {
+      return (rc_.axes[6] > 1800);
+    }
+    return false;
+  }
+
+  bool rcMovingStick()
+  {
+    if (!state_.rc_valid) return false;
+    if (rc_.axes.size() < 4) return false;
+    bool if_move = std::fabs(rc_.axes[0] - PWM_CENTER) > PWM_DEADZONE_RPY;
+    if_move = if_move || (std::fabs(rc_.axes[1] - PWM_CENTER) > PWM_DEADZONE_RPY);
+    if_move = if_move || (std::fabs(rc_.axes[3] - PWM_CENTER) > PWM_DEADZONE_RPY);
+    if_move = if_move || (std::fabs(rc_.axes[2] - PWM_CENTER) > PWM_DEADZONE_THR);
+    return if_move;
+  }
+
+  // Low pass filter
+  double lowpassFilter(double input, double fc, double output_last, double dt)
+  {
+    double RC = 1.0 / (fc * 2.0 * M_PI);
+    double alpha = dt / (RC + dt);
+    return output_last + alpha * (input - output_last);
+  }
+
+  // Convert FLU -> NED
+  Eigen::Quaterniond FLU2NED(const Eigen::Quaterniond & q)
+  {
+    Eigen::Matrix3d R = R_FLU2FRD_ * q.toRotationMatrix() * R_FLU2FRD_;
+    return Eigen::Quaterniond(R);
+  }
+
+  // Convert ENU -> NED
+  Eigen::Quaterniond ENU2NED(const Eigen::Quaterniond & q)
+  {
+    Eigen::Matrix3d R = R_ENU2NED_ * q.toRotationMatrix() * R_FLU2FRD_;
+    return Eigen::Quaterniond(R);
+  }
+}; // end class DroneCommander
+
 
 int main(int argc, char** argv)
 {
+  // Initialize ROS2
+  rclcpp::init(argc, argv);
 
-    ROS_INFO("SWARM_COMMANDER_CONTROL_INIT\nIniting\n");
+  RCLCPP_INFO(rclcpp::get_logger("rclcpp"), "SWARM_COMMANDER_CONTROL_INIT: Initializing DroneCommander node...");
+  
+  // Create node
+  auto node = std::make_shared<DroneCommander>();
 
-    ros::init(argc, argv, "drone_commander");
+  // Multi-threaded spinner
+  rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
+  executor.add_node(node);
+  executor.spin();
 
-    ros::NodeHandle nh("drone_commander");
-
-    DroneCommander swarm_commander(nh);
-
-    ROS_INFO("Drone Commander is ONLINE! \n");
-    ros::MultiThreadedSpinner spinner(4); // Use 4 threads
-    spinner.spin();
+  rclcpp::shutdown();
+  return 0;
 }
