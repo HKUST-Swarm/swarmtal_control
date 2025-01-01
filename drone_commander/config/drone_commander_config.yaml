@@ -1,0 +1,11 @@
+drone_commander:
+  ros__parameters:
+    max_odom_velocity: 30.0
+    use_px4_pos_ctrl: true
+    max_vo_latency: 1.0
+    battery_remain_cutoff: 230.0
+    battery_remain_param_a: 300.0
+    battery_remain_param_b: -4000.0
+    landing_thrust: 0.2
+    is_px4: true
+    rc_fail_detection: false

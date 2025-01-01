@@ -117,6 +117,7 @@ DroneCommander::DroneCommander()
   last_flight_status_ts_ = this->now();
   last_rc_ts_ = this->now();
   last_vo_ts_ = this->now();
+  last_vo_image_ts_ = this->now();
   last_onboard_cmd_ts_ = this->now();
   last_try_arm_time_ = this->now();
   last_send_odom_to_fc_ = this->now();
@@ -176,7 +177,7 @@ void DroneCommander::declareAllParameters()
   this->declare_parameter<double>("landing_att_mode_height", 0.1);
   this->declare_parameter<double>("landing_att_min_height",  0.1);
   this->declare_parameter<double>("loop_duration",           0.02);
-  this->declare_parameter<double>("param_.danger_speed_hover",       4.5);
+  this->declare_parameter<double>("danger_speed_hover",       4.5);
   this->declare_parameter<double>("landing_vel_z_battery_low", -0.5);
 
   // 其他原先 DroneCommanderParam 中的参数
@@ -218,7 +219,7 @@ void DroneCommander::getAllParameters()
   param_.landing_att_mode_height = this->get_parameter("landing_att_mode_height").as_double();
   param_.landing_att_min_height  = this->get_parameter("landing_att_min_height").as_double();
   param_.loop_duration           = this->get_parameter("loop_duration").as_double();
-  param_.danger_speed_hover      = this->get_parameter("param_.danger_speed_hover").as_double();
+  param_.danger_speed_hover      = this->get_parameter("danger_speed_hover").as_double();
   param_.landing_vel_z_battery_low = this->get_parameter("landing_vel_z_battery_low").as_double();
 
   param_.use_px4_pos_ctrl        = this->get_parameter("use_px4_pos_ctrl").as_bool();
@@ -241,7 +242,6 @@ void DroneCommander::getAllParameters()
     param_.rc_max_tilt_vel, param_.rc_max_z_vel, param_.rc_max_yaw_rate,
     param_.rc_max_tilt_angle, param_.danger_speed_hover
   );
-  // ... 你可以根据需要继续打印其他参数 ...
 }
 
 void DroneCommander::initROS2Interfaces()
