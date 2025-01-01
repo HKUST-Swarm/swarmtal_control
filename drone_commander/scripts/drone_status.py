@@ -1,106 +1,119 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
-from __future__ import print_function
+
 import argparse
-import rospy
-from swarmtal_msgs.msg import DroneOnboardCommand
 import sys
 import math
-import numpy as np
-import rosgraph
-import os, time
+import time
 from termcolor import colored
+import numpy as np
+
+import rclpy
+from rclpy.node import Node
 from sensor_msgs.msg import BatteryState
-from geometry_msgs.msg import Point, Vector3
+from geometry_msgs.msg import Vector3
 from nav_msgs.msg import Odometry
 
-def printBatteryLevel (battery_level, total=100, prefix ='', suffix ='', length = 100, fill ='█'):
-    """
-    Call in a loop to create terminal progress bar
-    @params:
-        iteration   - Required  : current iteration (Int)
-        total       - Required  : total iterations (Int)
-        prefix      - Optional  : prefix string (Str)
-        suffix      - Optional  : suffix string (Str)
-        decimals    - Optional  : positive number of decimals in percent complete (Int)
-        length      - Optional  : character length of bar (Int)
-        fill        - Optional  : bar fill character (Str)
-    """
-    percent = ("{0:4.1f}%").format(100 * (battery_level / float(total)))
-    filledLength = int(length * battery_level // total)
-    bar = "|" + fill * filledLength + '-' * (length - filledLength) +"|"
-    bar_color = "blue"
-    if battery_level < 30:
-        bar_color = "red"
-    elif battery_level < 70:
-        bar_color = "yellow"
-    elif battery_level < 95:
-        bar_color = "green"
+from swarmtal_msgs.msg import DroneOnboardCommand
 
-    print('\r%s %s %s %s' % (prefix, colored(bar, bar_color), colored(percent, bar_color), suffix), end = '\r')
-    sys.stdout.flush()
+class DroneStatus(Node):
+    def __init__(self, vo_topic):
+        super().__init__('drone_status')
+        
+        # 初始化变量
+        self.battery_voltage = 0.0
+        self.vo_position = Vector3()
+        self.vo_avail = False
+        self.last_vo_time = self.get_clock().now().to_msg().sec + self.get_clock().now().to_msg().nanosec / 1e9
 
+        # 创建订阅者
+        self.battery_sub = self.create_subscription(
+            BatteryState,
+            '/mavros/battery',
+            self.on_battery_status,
+            10
+        )
+        self.vo_sub = self.create_subscription(
+            Odometry,
+            vo_topic,
+            self.on_vo_msg,
+            10
+        )
 
-battery_votage = 0.0
-vo_position = Vector3()
-vo_avail = False
-last_vo_time = 0
+        self.get_logger().info("Subscribed to /mavros/battery and {}".format(vo_topic))
 
-def on_battery_status(bat_msg):
-    global battery_votage
-    battery_votage = bat_msg.voltage
+        # 创建定时器，频率为10Hz（0.1秒）
+        timer_period = 0.1  # 秒
+        self.timer = self.create_timer(timer_period, self.timer_callback)
 
+    def on_battery_status(self, msg):
+        self.battery_voltage = msg.voltage
 
-def on_vo_msg(vo_msg):
-    global vo_avail, vo_position, last_vo_time
-    vo_avail = True
-    vo_position = vo_msg.pose.pose.position
-    last_vo_time = rospy.get_time()
+    def on_vo_msg(self, msg):
+        self.vo_avail = True
+        self.vo_position = msg.pose.pose.position
+        self.last_vo_time = self.get_clock().now().to_msg().sec + self.get_clock().now().to_msg().nanosec / 1e9
 
-def battery_to_percent(bat):
-    if bat > 14.8:
-        return (bat - 14.8)/(16.8-14.8)*0.5+0.5
-    if 0<bat < 14.8:
-        return (bat-14.4)/(14.8-14.4)*0.5
-    return 0
+    def battery_to_percent(self, bat):
+        if bat > 14.8:
+            return (bat - 14.8)/(16.8-14.8)*0.5 + 0.5
+        if 0 < bat < 14.8:
+            return (bat - 14.4)/(14.8 - 14.4)*0.5
+        return 0.0
 
-def work(vo_topic="/vins_estimator/imu_propagate"):
-    global vo_avail, vo_position, last_vo_time, battery_votage
+    def print_battery_level(self, battery_level, total=100, prefix='', suffix='', length=100, fill='█'):
+        percent = ("{0:4.1f}%").format(100 * (battery_level / float(total)))
+        filled_length = int(length * battery_level // total)
+        bar = "|" + fill * filled_length + '-' * (length - filled_length) + "|"
+        bar_color = "blue"
+        if battery_level < 30:
+            bar_color = "red"
+        elif battery_level < 70:
+            bar_color = "yellow"
+        elif battery_level < 95:
+            bar_color = "green"
 
-    rospy.init_node("drone_status")
-    s_bat = rospy.Subscriber("/dji_sdk_1/dji_sdk/battery_state", BatteryState, on_battery_status)
-    s_vo = rospy.Subscriber(vo_topic, Odometry, on_vo_msg)
-    #Wait for dji_sdk
-    rospy.loginfo("Wait for dji sdk.....")
-    # rospy.wait_for_service("/dji_sdk_1/dji_sdk/set_hardsyc")
-    rospy.loginfo("DJI SDK started")
-    r = rospy.Rate(10)
-    while not rospy.is_shutdown() and rosgraph.is_master_online():
-        prefix = "[{:7.3f}s]".format(rospy.get_time() % 1000)
-        if vo_avail:
+        print('\r%s %s %s %s' % (prefix, colored(bar, bar_color), colored(percent, bar_color), suffix), end='\r')
+        sys.stdout.flush()
+
+    def timer_callback(self):
+        current_time = self.get_clock().now().to_msg().sec + self.get_clock().now().to_msg().nanosec / 1e9
+        prefix = "[{:7.3f}s]".format(current_time % 1000)
+
+        if self.vo_avail and (current_time - self.last_vo_time) <= 0.2:
             vo_color = "green"
+            vo_str = " VO {} :[{:5.3f}, {:5.3f}, {:5.3f}]".format(self.vo_avail, 
+                                                                   self.vo_position.x, 
+                                                                   self.vo_position.y, 
+                                                                   self.vo_position.z)
         else:
             vo_color = "red"
+            vo_str = " VO {} :[{:5.3f}, {:5.3f}, {:5.3f}]".format(False, 0.0, 0.0, 0.0)
+            self.vo_avail = False  # 如果超过时间阈值，认为VO不可用
 
-        vo_str = " VO {} :[{:5.3f}, {:5.3f}, {:5.3f}]".format(vo_avail, vo_position.x, vo_position.y, vo_position.z)
         prefix = prefix + colored(vo_str, vo_color) + " BAT:"
-        bat_l = battery_to_percent(battery_votage) * 100
-        suffix = ":{:4.2f}V".format(battery_votage)
-        printBatteryLevel(bat_l, 100, prefix, suffix, length=10)
-        r.sleep()
+        bat_percent = self.battery_to_percent(self.battery_voltage) * 100
+        suffix = ":{:4.2f}V".format(self.battery_voltage)
+        self.print_battery_level(bat_percent, 100, prefix, suffix, length=10)
 
-        if rospy.get_time() - last_vo_time > 0.2:
-            vo_avail = False
-    print()
+def main(args=None):
+    parser = argparse.ArgumentParser(description='A simple command tool for monitoring drone status.')
+    parser.add_argument('--vo_topic', type=str, default='/d2vins/odometry', 
+                        help='Visual Odometry topic to subscribe to.')
+    args = parser.parse_args()
+
+    rclpy.init()
+
+    drone_status_node = DroneStatus(vo_topic=args.vo_topic)
+
+    try:
+        rclpy.spin(drone_status_node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        drone_status_node.destroy_node()
+        rclpy.shutdown()
+        print()
 
 if __name__ == "__main__":
-    while not rospy.is_shutdown():
-        if rosgraph.is_master_online():
-            if len(sys.argv) > 1:
-                vo_topic = sys.argv[1]
-            else:
-                vo_topic = "/vins_estimator/odometry"
-            work(vo_topic)
-        else:
-            print("[DRONE_STATUS][{}] Wait For rosmaster".format(time.time()))
-            time.sleep(1.0)
+    main()
