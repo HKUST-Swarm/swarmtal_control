@@ -270,13 +270,8 @@ void DroneCommander::initROS2Interfaces()
     10,
     [this](const OCMD::SharedPtr cmd){ this->onboardCmdCallback(*cmd); }
   );
-  rc_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
-    "rc",
-    1,
-    [this](const sensor_msgs::msg::Joy::SharedPtr joy){ this->rcCallback(*joy); }
-  );
   rc_mavros_sub_ = this->create_subscription<mavros_msgs::msg::RCIn>(
-    "rc_mavros_in",
+    "rc",
     1,
     [this](const mavros_msgs::msg::RCIn::SharedPtr rc){ this->rcMavrosCallback(*rc); }
   );
@@ -540,16 +535,6 @@ void DroneCommander::voCallback(const nav_msgs::msg::Odometry & odom)
   state_.vel.y = odom.twist.twist.linear.y;
   state_.vel.z = odom.twist.twist.linear.z;
   state_.yaw = yaw_vo_;
-}
-
-void DroneCommander::rcCallback(const sensor_msgs::msg::Joy & joy)
-{
-  state_.rc_valid = isRcValid(joy);
-  if (state_.rc_valid) {
-    rc_ = joy;
-    last_rc_ts_ = this->now();
-  }
-  state_.djisdk_valid = true;
 }
 
 void DroneCommander::rcMavrosCallback(const mavros_msgs::msg::RCIn & rc_in)
@@ -1246,13 +1231,6 @@ bool DroneCommander::isOdomValid(const nav_msgs::msg::Odometry & odom)
   if ((now_t - last_vo_image_ts_).seconds() > param_.max_vo_latency) {
     return false;
   }
-  return true;
-}
-
-bool DroneCommander::isRcValid(const sensor_msgs::msg::Joy & joy)
-{
-  // In original code: `return px4_fcu_state.manual_input;`
-  // We don't store that here, so let's assume if we get JOY message => valid
   return true;
 }
 

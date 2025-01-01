@@ -52,6 +52,8 @@ install(TARGETS
 install(
   PROGRAMS
     scripts/px4_odom_converter.py
+    scripts/drone_status.py
+    scripts/drone_cmd.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -1,125 +1,139 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-import argparse
-import rospy
-from swarmtal_msgs.msg import DroneOnboardCommand
 import sys
 import math
+import time
+import argparse
 import numpy as np
 
-def send(cmd, args, pub):
-    # pub = rospy.Publisher("/drone_commander/onboard_command", DroneOnboardCommand, queue_size=1)
-    pub.publish(cmd)
+import rclpy
+from rclpy.node import Node
 
+# swarmtal_msgs (ROS2 版本) 中的消息
+from swarmtal_msgs.msg import DroneOnboardCommand
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='A easy command tool for sending command to swarm drone')
-    parser.add_argument('command_type', metavar='command_type', choices=
-        ["takeoff", "landing", "emland", "flyto","vel", "arm", "disarm", "joy_control", "circle", "circle_yaw", "sweep", "csv"], help="Type of command to send")
+def main():
+    parser = argparse.ArgumentParser(description='A simple command tool for sending DroneOnboardCommand.')
+    parser.add_argument('command_type', 
+                        metavar='command_type', 
+                        choices=["takeoff", "landing", "emland", "flyto", "vel", "arm", "disarm", 
+                                 "joy_control", "circle", "circle_yaw", "sweep", "csv"],
+                        help="Type of command to send")
     parser.add_argument("-c","--center", nargs=3, type=float, help="center for circle", default=[0, 0, 1])
     parser.add_argument("-r","--radius", type=float, help="radius for circle", default=0.5)
-    parser.add_argument("-t","--cycle", type=float, help="cycle for circle or for sweep a cycle", default=30)
+    parser.add_argument("-t","--cycle", type=float, help="cycle for circle or sweep", default=30)
     parser.add_argument("--fmin", type=float, help="min freq for sweep", default=0.1)
     parser.add_argument("--fmax", type=float, help="max freq for sweep", default=5)
-    parser.add_argument("--count", type=int, help="sweep count number for sweep", default=3)
+    parser.add_argument("--count", type=int, help="sweep count number", default=3)
     parser.add_argument("-x", "--axis", type=int, help="axis for sweep", default=0)
     parser.add_argument("-A", "--amp", type=float, help="amp for sweep", default=1.0)
-    parser.add_argument("-p", "--path", type=str, help="Path", default="")
+    parser.add_argument("-p", "--path", type=str, help="Path for CSV file", default="")
+    parser.add_argument("params", nargs="*", type=float, help="parameters for command")
 
-    parser.add_argument("params",nargs="*", type=float, help="parameters for command")
     args = parser.parse_args()
 
-    print("Will send command {} with params {}".format(args.command_type, args.params))
+    print(f"Will send command {args.command_type} with params {args.params}")
 
-    try:
-        rospy.get_master().getPid()
-    except:
-        print("roscore is offline, exit")
-        sys.exit(-1)
+    rclpy.init()
 
-    rospy.init_node('cmded', anonymous=True)
+    node = rclpy.create_node('cmded')
+    node.get_logger().info("Initializing drone_cmd (ROS2) node...")
 
+    # 创建 Publisher
+    pub = node.create_publisher(DroneOnboardCommand, '/drone_commander/onboard_command', 10)
+    node.get_logger().info("Publisher created on /drone_commander/onboard_command")
 
-    print("Sending to onboard")
-    pub = rospy.Publisher("/drone_commander/onboard_command", DroneOnboardCommand, queue_size=1)
-
-
-    rate = rospy.Rate(50)  # 20hz
-
-    while not rospy.is_shutdown():
-        connections = pub.get_num_connections()
-        print("Wait for pub")
-        if connections > 0:
+    # 等待至少一个订阅者连接
+    while rclpy.ok():
+        sub_count = pub.get_subscription_count()
+        if sub_count > 0:
+            node.get_logger().info(f"Detected {sub_count} subscriber(s), ready to send command.")
             break
-        rate.sleep()
+        else:
+            node.get_logger().info("Waiting for subscriber connection...")
+            time.sleep(0.5)
+
     cmd = DroneOnboardCommand()
 
+    def send_command(c: DroneOnboardCommand):
+        """发布命令并打印简单信息."""
+        pub.publish(c)
+        node.get_logger().info(f"Sent command_type={c.command_type}, param1={c.param1}, param2={c.param2} ...")
+
+    # 以 50Hz 循环 => 间隔 0.02s
+    sleep_dt = 0.02
+
+    # 根据 command_type 不同，填充并发送 DroneOnboardCommand
     if args.command_type == "takeoff":
+        # param: height
         if len(args.params) < 1:
-            rospy.logwarn("No height specs, will fly to default 1.0m")
+            node.get_logger().warn("No height specified, default to 1.0m")
             height = 1.0
         else:
             height = args.params[0]
         cmd.command_type = DroneOnboardCommand.CTRL_TAKEOF_COMMAND
         cmd.param1 = int(height*10000)
-        cmd.param2 = 5000 # 0.5m/s
-        send(cmd, args, pub)
+        cmd.param2 = 5000  # 0.5m/s
+
+        send_command(cmd)
 
     elif args.command_type == "landing":
         cmd.command_type = DroneOnboardCommand.CTRL_LANDING_COMMAND
         cmd.param1 = 0
         cmd.param2 = 3000
-        send(cmd, args, pub)
+        send_command(cmd)
 
     elif args.command_type == "emland":
         cmd.command_type = DroneOnboardCommand.CTRL_LANDING_COMMAND
         cmd.param1 = 1
         cmd.param2 = 10000
-        send(cmd, args, pub)
+        send_command(cmd)
 
     elif args.command_type == "arm":
         cmd.command_type = DroneOnboardCommand.CTRL_ARM_COMMAND
         cmd.param1 = 1
-        send(cmd, args, pub)
-
+        send_command(cmd)
 
     elif args.command_type == "disarm":
         cmd.command_type = DroneOnboardCommand.CTRL_ARM_COMMAND
         cmd.param1 = 0
-        send(cmd, args, pub)
-
+        send_command(cmd)
 
     elif args.command_type == "flyto":
         cmd.command_type = DroneOnboardCommand.CTRL_POS_COMMAND
         if len(args.params) < 3:
-            rospy.logerr("Must give xyz when using flyto")
+            node.get_logger().error("Must give X Y Z when using flyto")
+            node.destroy_node()
+            rclpy.shutdown()
             sys.exit(-1)
         else:
-            cmd.param1 = int(args.params[0]*10000)
-            cmd.param2 = int(args.params[1]*10000)
-            cmd.param3 = int(args.params[2]*10000)
-
+            cmd.param1 = int(args.params[0] * 10000)
+            cmd.param2 = int(args.params[1] * 10000)
+            cmd.param3 = int(args.params[2] * 10000)
             if len(args.params) == 4:
-                cmd.param4 = int(args.params[3]*10000)
+                cmd.param4 = int(args.params[3] * 10000)
             else:
-                cmd.param4 = 666666
+                cmd.param4 = 666666  # MAGIC
             cmd.param5 = 0
             cmd.param6 = 0
             cmd.param7 = 0
             cmd.param8 = 0
 
+        # 连续发送，直到 Ctrl+C or 节点关闭
+        try:
+            while rclpy.ok():
+                send_command(cmd)
+                time.sleep(sleep_dt)
+        except KeyboardInterrupt:
+            pass
 
-        while not rospy.is_shutdown():
-            try:
-                send(cmd, args, pub)
-                rate.sleep()
-            except KeyboardInterrupt:
-                exit(0)
-    
     elif args.command_type == "vel":
         cmd.command_type = DroneOnboardCommand.CTRL_VEL_COMMAND
         if len(args.params) < 3:
-            rospy.logerr("Must give xyz when using flyto")
+            node.get_logger().error("Must give VX VY VZ when using vel")
+            node.destroy_node()
+            rclpy.shutdown()
             sys.exit(-1)
         else:
             cmd.param1 = int(args.params[0]*10000)
@@ -130,57 +144,41 @@ if __name__ == "__main__":
                 cmd.param4 = int(args.params[3]*10000)
             else:
                 cmd.param4 = 666666
+
             cmd.param5 = 0
             cmd.param6 = 0
             cmd.param7 = 0
             cmd.param8 = 0
-        while not rospy.is_shutdown():
-            try:
-                send(cmd, args, pub)
-                rate.sleep()
-            except KeyboardInterrupt:
-                exit(0)
 
-    elif args.command_type == "circle" or args.command_type == "circle_yaw":
+        try:
+            while rclpy.ok():
+                send_command(cmd)
+                time.sleep(sleep_dt)
+        except KeyboardInterrupt:
+            pass
+
+    elif args.command_type in ("circle", "circle_yaw"):
         cmd.command_type = DroneOnboardCommand.CTRL_POS_COMMAND
-        print("Will draw circle @ origin {} {} {}, r {} T {}".format(
-            args.center[0],
-            args.center[1],
-            args.center[2],
-            args.radius,
-            args.cycle
-        ))
+        node.get_logger().info(f"Will draw circle at center={args.center} r={args.radius}, cycle={args.cycle}")
 
-        ox = args.center[0]
-        oy = args.center[1]
-        oz = args.center[2]
+        ox, oy, oz = args.center
         r = args.radius
         T = args.cycle
-
-
-        cmd.param1 = 0
-        cmd.param2 = 0
-        cmd.param3 = 0
         cmd.param4 = 666666
-        cmd.param5 = 0
-        cmd.param6 = 0
-        cmd.param7 = 0
-        cmd.param8 = 0
-        cmd.param9 = 0
-        cmd.param10 = 0
 
-        t = 0
-        yaw = 666666
-        while not rospy.is_shutdown():
-            try:
+        t = 0.0
+        yaw = 666666.0
+        try:
+            while rclpy.ok():
                 x = ox + math.sin(t*math.pi*2/T)*r
                 y = oy + math.cos(t*math.pi*2/T)*r
                 vx = math.cos(t*math.pi*2/T) * r * math.pi*2/T
                 vy = -math.sin(t*math.pi*2/T) * r * math.pi*2/T
                 if args.command_type == "circle_yaw":
                     yaw = t*math.pi*2/T
-                ax = - math.sin(t*math.pi*2/T) * r * math.pi*2/T * math.pi*2/T
-                ay = - math.cos(t*math.pi*2/T) * r * math.pi*2/T * math.pi*2/T
+
+                ax = - math.sin(t*math.pi*2/T) * r * (math.pi*2/T)**2
+                ay = - math.cos(t*math.pi*2/T) * r * (math.pi*2/T)**2
 
                 cmd.param1 = int(x*10000)
                 cmd.param2 = int(y*10000)
@@ -190,109 +188,104 @@ if __name__ == "__main__":
                 cmd.param5 = int(vx*10000)
                 cmd.param6 = int(vy*10000)
                 cmd.param7 = 0
-
                 cmd.param8 = int(ax*10000)
                 cmd.param9 = int(ay*10000)
 
-                rospy.loginfo("{:3.2f} xyz {:3.2f} {:3.2f} {:3.2f} Y {:3.2f} ff {:3.2f} {:3.2f} {:3.2f} {:3.2f}".format(t, x, y, oz, yaw, vx, vy, ax, ay))
-                send(cmd, args, pub)
-                t = t + 0.02
-                rate.sleep()
+                node.get_logger().info(
+                    f"{t:.2f}s => xyz({x:.2f},{y:.2f},{oz:.2f}), yaw={yaw:.2f}, ff=({vx:.2f},{vy:.2f}), acc=({ax:.2f},{ay:.2f})"
+                )
+                send_command(cmd)
 
-            except KeyboardInterrupt:
-                exit(0)
+                t += sleep_dt
+                time.sleep(sleep_dt)
+        except KeyboardInterrupt:
+            pass
 
     elif args.command_type == "csv":
         cmd.command_type = DroneOnboardCommand.CTRL_POS_COMMAND
         cmd.param4 = 666666
-        if args.path=="":
-            rospy.loginfo("No csv specs, exit")
+
+        if args.path == "":
+            node.get_logger().info("No CSV path specified, exit.")
+            node.destroy_node()
+            rclpy.shutdown()
             sys.exit(-1)
         else:
             csv_path = args.path
             csv_data = np.genfromtxt(csv_path, delimiter=',')
-            rospy.loginfo("CSV duration {}s len {}".format(len(csv_data), len(csv_data)/50))
+            node.get_logger().info(f"CSV loaded, length={len(csv_data)}, total time={len(csv_data)/50:.2f}s")
 
-        cmd.param1 = 0
-        cmd.param2 = 0
-        cmd.param3 = 0
-        cmd.param4 = 666666
-        cmd.param5 = 0
-        cmd.param6 = 0
-        cmd.param7 = 0
-        cmd.param8 = 0
-        cmd.param9 = 0
-        cmd.param10 = 0
-
-        t = 0
+        t = 0.0
         tick = 0
-        while not rospy.is_shutdown():
-            x = csv_data[tick,0]
-            y = csv_data[tick,1]
-            z = csv_data[tick,2]
-            vx = csv_data[tick,3]
-            vy = csv_data[tick,4]
+        try:
+            while rclpy.ok():
+                if tick >= len(csv_data):
+                    node.get_logger().info("Reached end of CSV data, stop sending.")
+                    break
 
-            cmd.param1 = int(x*10000)
-            cmd.param2 = int(y*10000)
-            cmd.param3 = int(z*10000)
-            cmd.param5 = int(vx*10000)
-            cmd.param6 = int(vy*10000)
-            cmd.param7 = 0
+                x  = csv_data[tick,0]
+                y  = csv_data[tick,1]
+                z  = csv_data[tick,2]
+                vx = csv_data[tick,3]
+                vy = csv_data[tick,4]
 
+                cmd.param1 = int(x*10000)
+                cmd.param2 = int(y*10000)
+                cmd.param3 = int(z*10000)
+                cmd.param5 = int(vx*10000)
+                cmd.param6 = int(vy*10000)
+                cmd.param7 = 0
 
-            rospy.loginfo_throttle(0.1, "{:3.2f} xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f}".format(t, x, y, z, vx, vy))
-            send(cmd, args, pub)
-            t = t + 0.02
-            tick = tick + 1
-            rate.sleep()
+                # 如果想减少控制台频繁输出，可以调节打印频率
+                node.get_logger().info(f"{t:.2f}s => xyz({x:.2f},{y:.2f},{z:.2f}), ff=({vx:.2f},{vy:.2f})")
+                send_command(cmd)
+
+                t    += sleep_dt
+                tick += 1
+                time.sleep(sleep_dt)
+        except KeyboardInterrupt:
+            pass
 
     elif args.command_type == "sweep":
         cmd.command_type = DroneOnboardCommand.CTRL_POS_COMMAND
         cmd.param4 = 666666
 
-        print("Will sweep axis {} @ origin {} {} {}, amp {} T {} freq {}:{}/s by{} times".format(
-            args.axis,
-            args.center[0],
-            args.center[1],
-            args.center[2],
-            args.amp,
+        node.get_logger().info(f"Will sweep axis={args.axis} @ origin={args.center}, amp={args.amp}, T={args.cycle}, f={args.fmin}~{args.fmax}, count={args.count}")
+        
+        def generate_sweep_signal_base_func(T, omgmin=0.3, omgmax=12.0, c1=4.0, c2=0.0187):
+            """仿原脚本: 生成一个随时间变化的函数, 实现 sweep 效果."""
+            return lambda _t: math.sin(
+                _t * omgmin + (omgmax - omgmin) * c2 * (T / c1 * (math.exp(c1 * _t / T) - 1) - _t)
+            )
+
+        func = generate_sweep_signal_base_func(
             args.cycle,
-            args.fmin,
-            args.fmax,
-            args.count
-        ))
+            omgmin=args.fmin*2*math.pi,
+            omgmax=args.fmax*2*math.pi
+        )
 
-        def generate_sweep_signal_base_func(T, omgmin=0.3, omgmax=12, c1=4.0, c2=0.0187):
-            return lambda t: math.sin(t * omgmin + (omgmax - omgmin) * c2 * (T / c1 * (math.exp(c1 * t / T) - 1) - t))
-        func  = generate_sweep_signal_base_func(args.cycle, omgmin=args.fmin*6.28, omgmax=args.fmax*6.28)
-
-        t = 0
+        t = 0.0
         count = 0
+        try:
+            while rclpy.ok() and count < args.count:
+                x0, y0, z0 = args.center
+                vx = 0.0
+                vy = 0.0
+                vz = 0.0
+                x  = x0
+                y  = y0
+                z  = z0
 
-        while not rospy.is_shutdown() and count < args.count:
-            try:
-                x0 = args.center[0]
-                y0 = args.center[1]
-                z0 = args.center[2]
-
-                vx = 0
-                vy = 0
-                vz = 0
-
-                x = x0
-                y = y0
-                z = z0
-
+                val = func(t)*args.amp
                 if args.axis == 0:
-                    vx = func(t) * args.amp
-                    x = func(t) * args.amp + x0
+                    vx = val
+                    x  = x0 + val
                 elif args.axis == 1:
-                    vy = func(t) * args.amp
-                    y = func(t) * args.amp + y0
+                    vy = val
+                    y  = y0 + val
                 elif args.axis == 2:
-                    vz = func(t) * args.amp
-                    z = func(t) * args.amp + z0
+                    vz = val
+                    z  = z0 + val
 
                 cmd.param1 = int(x*10000)
                 cmd.param2 = int(y*10000)
@@ -301,13 +294,26 @@ if __name__ == "__main__":
                 cmd.param6 = int(vy*10000)
                 cmd.param7 = int(vz*10000)
 
-                print("[{}:{:3.2f}] Sweeping.... xyz {:3.2f} {:3.2f} {:3.2f} ff {:3.2f} {:3.2f} {:3.2f}".format(count, t, x, y, z, vx, vy, vz))
-                send(cmd, args, pub)
-                t = t + 0.02
+                node.get_logger().info(f"[{count}:{t:.2f}s] Sweeping => xyz({x:.2f},{y:.2f},{z:.2f}), ff=({vx:.2f},{vy:.2f},{vz:.2f})")
+                send_command(cmd)
+
+                time.sleep(sleep_dt)
+                t += sleep_dt
                 if t > args.cycle:
-                    count = count + 1
-                    t = 0
-                rate.sleep()
-                print("Finish sweep, stop")
-            except KeyboardInterrupt:
-                exit(0) 
+                    count += 1
+                    t = 0.0
+                    node.get_logger().info(f"Finish sweep {count}/{args.count}, resetting time.")
+            node.get_logger().info("Sweep done or reached max count.")
+        except KeyboardInterrupt:
+            pass
+
+    else:
+        node.get_logger().error(f"Unknown command_type: {args.command_type}")
+
+    node.get_logger().info("Done sending command. Shutting down...")
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

@@ -235,7 +235,6 @@ private:
   bool needControlByThis();
   bool checkControlAuth();
   bool isOdomValid(const nav_msgs::msg::Odometry & odom);
-  bool isRcValid(const sensor_msgs::msg::Joy & joy);
   void resetYawSp();
   void resetCtrlCmd();
   void resetCtrlCmdMaxVel();

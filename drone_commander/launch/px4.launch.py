@@ -44,6 +44,12 @@ def generate_launch_description():
         ),
         description='Full path to the drone_commander config YAML file'
     )
+    
+    drone_id_arg = DeclareLaunchArgument(
+        'drone_id',
+        default_value='1',
+        description='Drone ID'
+    )
 
     # 2) Node: drone_commander
     #    - prefix with "nice --20"
@@ -54,15 +60,16 @@ def generate_launch_description():
         executable='drone_commander_node',
         name='drone_commander',
         output=LaunchConfiguration('output'),
-        prefix=['gdb --ex=run --args '], # For debugging
         remappings=[
-            ('/drone_commander/visual_odometry', LaunchConfiguration('vo_imu_topic')),
-            ('/drone_commander/visual_odometry_image', LaunchConfiguration('vo_topic')),
-            ('/drone_commander/flight_status', '/dji_sdk_1/dji_sdk/flight_status'),
-            ('/drone_commander/rc', '/mavros/rc/in'),
-            ('/drone_commander/battery', '/mavros/battery'),
-            ('/drone_commander/fc_imu', '/mavros/imu/data_raw'),
-            ('/drone_commander/fc_imu_fused', '/mavros/imu/data')
+            ('visual_odometry', LaunchConfiguration('vo_imu_topic')),
+            ('visual_odometry_image', LaunchConfiguration('vo_topic')),
+            ('flight_status', '/dji_sdk_1/dji_sdk/flight_status'),
+            ('rc', '/mavros/rc/in'),
+            ('battery', '/mavros/battery'),
+            ('fc_imu', '/mavros/imu/data_raw'),
+            ('fc_imu_fused', '/mavros/imu/data'),
+            ('onboard_command', '/drone_commander/onboard_command'),
+            ('/swarm_commander_state', '/drone_commander/swarm_commander_state'),
         ],
         parameters=[
             LaunchConfiguration('config_path'),   # 加载 YAML
