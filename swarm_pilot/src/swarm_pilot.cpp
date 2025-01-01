@@ -118,7 +118,6 @@ SwarmPilot::SwarmPilot()
     node_->declare_parameter<bool>("planning_debug_mode", false);
     node_->declare_parameter<int>("drone_id", -1);
     node_->declare_parameter<int>("acpt_cmd_node", -1);
-    node_->declare_parameter<double>("send_drone_status_freq", 5.0);
     node_->declare_parameter<double>("Ts", 0.1);
     node_->declare_parameter<double>("heartbeat_timeout", 0.5);
     node_->declare_parameter<bool>("enable_planner", false);
@@ -126,7 +125,6 @@ SwarmPilot::SwarmPilot()
     node_->get_parameter("planning_debug_mode", planning_debug_mode);
     node_->get_parameter("drone_id", self_id);
     node_->get_parameter("acpt_cmd_node", accept_cmd_node_id);
-    node_->get_parameter("send_drone_status_freq", send_drone_status_freq);
     double Ts;
     node_->get_parameter("Ts", Ts);
     node_->get_parameter("heartbeat_timeout", heartbeat_timeout);

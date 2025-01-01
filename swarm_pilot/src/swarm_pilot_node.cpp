@@ -14,7 +14,7 @@ int main(int argc, char** argv)
     rclcpp::executors::MultiThreadedExecutor executor(rclcpp::ExecutorOptions(), 4);
     executor.add_node(node);
     executor.spin();
-      rclcpp::shutdown();
+    rclcpp::shutdown();
 
     return 0;
 }

@@ -16,7 +16,7 @@ from launch.actions import DeclareLaunchArgument
 from launch.actions import SetLaunchConfiguration
 from launch.substitutions import LaunchConfiguration, TextSubstitution
 from launch_ros.actions import Node
-
+from launch.conditions import IfCondition
 
 def generate_launch_description():
     # 1) Declare launch arguments (similar to ROS1 <arg> tags)
@@ -50,10 +50,28 @@ def generate_launch_description():
         description='Full path to the drone_commander config YAML file'
     )
     
+    planning_debug_mode_arg = DeclareLaunchArgument(
+        'planning_debug_mode',
+        default_value='false',
+        description='Planning debug mode'
+    )
+    
+    enable_planner_arg = DeclareLaunchArgument(
+        'enable_planner',
+        default_value='true',
+        description='Enable planner'
+    )
+    
     drone_id_arg = DeclareLaunchArgument(
         'drone_id',
         default_value='1',
         description='Drone ID'
+    )
+    
+    enable_odom_transformer_arg = DeclareLaunchArgument(
+        'enable_odom_transformer',
+        default_value='true',
+        description='Enable odom transformer'
     )
     
     drone_id = LaunchConfiguration('drone_id')
@@ -78,6 +96,19 @@ def generate_launch_description():
             {'drone_id': drone_id}  # 加载参数
         ],
     )
+    
+    swarm_pilot_node = Node(
+        package='swarm_pilot',
+        executable='swarm_pilot_node',
+        name='swarm_pilot',
+        namespace=namespace,
+        output='screen',
+        parameters=[
+            {'drone_id': drone_id,
+             "planning_debug_mode": LaunchConfiguration('planning_debug_mode'),
+             "enable_planner": LaunchConfiguration('enable_planner')}
+        ]
+    )               
 
     odom_transformer_node = Node(
         package='drone_commander',
@@ -88,7 +119,8 @@ def generate_launch_description():
         remappings=[
             ('odom_in', 'mavros/odometry/in'),
             ('odom_out', 'mavros/odometry/in_correct')
-        ]
+        ],
+        condition=IfCondition(LaunchConfiguration('enable_odom_transformer'))
     )
 
     return LaunchDescription([
@@ -97,6 +129,10 @@ def generate_launch_description():
         output_arg,
         config_path_arg,
         drone_id_arg,
+        planning_debug_mode_arg,
+        enable_planner_arg,
+        enable_odom_transformer_arg,
         drone_commander_node,
-        odom_transformer_node
+        odom_transformer_node,
+        swarm_pilot_node
     ])

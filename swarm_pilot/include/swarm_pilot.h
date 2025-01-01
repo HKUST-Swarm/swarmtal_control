@@ -81,7 +81,6 @@ class SwarmPilot : public rclcpp::Node {
     Vector3d eight_trajectory_center;
 
     int accept_cmd_node_id = -1; //-1 Accept all, >=0 accept corresponding
-    double send_drone_status_freq = 1.0;
     double heartbeat_timeout = 0.5;
     double send_odom_freq = 50.0;
 

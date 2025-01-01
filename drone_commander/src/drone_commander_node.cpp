@@ -248,7 +248,7 @@ void DroneCommander::getAllParameters()
 void DroneCommander::initROS2Interfaces()
 {
   // Publishers
-  commander_state_pub_ = this->create_publisher<DCMD>("drone_commander/swarm_commander_state", 1);
+  commander_state_pub_ = this->create_publisher<DCMD>("/swarm_commander_state", 1);
   ctrl_cmd_pub_ = this->create_publisher<DPCL>("drone_position_control/drone_pos_cmd", 1);
   control_pos_vel_px4_pub_ = this->create_publisher<mavros_msgs::msg::PositionTarget>("mavros/setpoint_raw/local", 1);
   control_att_pub_ = this->create_publisher<mavros_msgs::msg::AttitudeTarget>("mavros/setpoint_raw/attitude", 1);
