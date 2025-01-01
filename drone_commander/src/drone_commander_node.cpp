@@ -150,6 +150,7 @@ void DroneCommander::declareAllParameters()
   // 将原先宏定义的默认值放到这里
   // 1) 先声明 param_.xxx，给出默认值
   // 2) 用户也可以通过命令行/launch文件修改
+  this->declare_parameter<int>("drone_id",                   1);
   this->declare_parameter<double>("max_loss_rc",             1.0);
   this->declare_parameter<double>("max_loss_sdk",            1.0);
   this->declare_parameter<double>("max_odom_velocity",       25.0);
@@ -187,11 +188,11 @@ void DroneCommander::declareAllParameters()
   this->declare_parameter<double>("battery_remain_param_a", 345.375);
   this->declare_parameter<double>("battery_remain_param_b", -4757.3);
   this->declare_parameter<double>("landing_thrust", 0.2);
-  this->declare_parameter<bool>("is_px4", true);
 }
 
 void DroneCommander::getAllParameters()
 {
+  param_.drone_id               = this->get_parameter("drone_id").as_int();
   param_.max_loss_rc             = this->get_parameter("max_loss_rc").as_double();
   param_.max_loss_sdk            = this->get_parameter("max_loss_sdk").as_double();
   param_.max_odom_velocity       = this->get_parameter("max_odom_velocity").as_double();
@@ -228,9 +229,9 @@ void DroneCommander::getAllParameters()
   param_.battery_remain_param_a  = this->get_parameter("battery_remain_param_a").as_double();
   param_.battery_remain_param_b  = this->get_parameter("battery_remain_param_b").as_double();
   param_.landing_thrust          = this->get_parameter("landing_thrust").as_double();
-  param_.is_px4                  = this->get_parameter("is_px4").as_bool();
 
   // 打印日志
+  RCLCPP_INFO(this->get_logger(), "DroneCommander: init at drone %d", param_.drone_id);
   RCLCPP_INFO(this->get_logger(), "Loaded parameters:");
   RCLCPP_INFO(this->get_logger(), 
     "max_loss_rc=%.2f, max_loss_sdk=%.2f, max_odom_velocity=%.2f, rc_deadzone_rpy=%.2f, rc_deadzone_thrust=%.2f, loop_duration=%.2f",
@@ -247,12 +248,12 @@ void DroneCommander::getAllParameters()
 void DroneCommander::initROS2Interfaces()
 {
   // Publishers
-  commander_state_pub_ = this->create_publisher<DCMD>("swarm_commander_state", 1);
-  ctrl_cmd_pub_ = this->create_publisher<DPCL>("/drone_position_control/drone_pos_cmd", 1);
-  control_pos_vel_px4_pub_ = this->create_publisher<mavros_msgs::msg::PositionTarget>("/mavros/setpoint_raw/local", 1);
-  control_att_pub_ = this->create_publisher<mavros_msgs::msg::AttitudeTarget>("/mavros/setpoint_raw/attitude", 1);
-  mavros_system_status_pub_ = this->create_publisher<mavros_msgs::msg::CompanionProcessStatus>("/mavros/companion_process/status", 1);
-  mavros_odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("/mavros/odometry/out", 10);
+  commander_state_pub_ = this->create_publisher<DCMD>("drone_commander/swarm_commander_state", 1);
+  ctrl_cmd_pub_ = this->create_publisher<DPCL>("drone_position_control/drone_pos_cmd", 1);
+  control_pos_vel_px4_pub_ = this->create_publisher<mavros_msgs::msg::PositionTarget>("mavros/setpoint_raw/local", 1);
+  control_att_pub_ = this->create_publisher<mavros_msgs::msg::AttitudeTarget>("mavros/setpoint_raw/attitude", 1);
+  mavros_system_status_pub_ = this->create_publisher<mavros_msgs::msg::CompanionProcessStatus>("mavros/companion_process/status", 1);
+  mavros_odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("mavros/odometry/out", 10);
 
   // Subscriptions
   vo_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
@@ -266,37 +267,37 @@ void DroneCommander::initROS2Interfaces()
     [this](const nav_msgs::msg::Odometry::SharedPtr msg){ this->voCallbackImage(*msg); }
   );
   onboard_cmd_sub_ = this->create_subscription<OCMD>(
-    "onboard_command",
+    "drone_commander/onboard_command",
     10,
     [this](const OCMD::SharedPtr cmd){ this->onboardCmdCallback(*cmd); }
   );
   rc_mavros_sub_ = this->create_subscription<mavros_msgs::msg::RCIn>(
-    "rc",
+    "mavros/rc/in",
     1,
     [this](const mavros_msgs::msg::RCIn::SharedPtr rc){ this->rcMavrosCallback(*rc); }
   );
   bat_sub_ = this->create_subscription<sensor_msgs::msg::BatteryState>(
-    "battery",
+    "mavros/battery",
     1,
     [this](const sensor_msgs::msg::BatteryState::SharedPtr bat){ this->batteryCallback(*bat); }
   );
   imu_data_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-    "fc_imu",
+    "mavros/imu/data_raw",
     1,
     [this](const sensor_msgs::msg::Imu::SharedPtr imu){ this->onImuData(*imu); }
   );
   imu_fused_data_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
-    "fc_imu_fused",
+    "mavros/imu/data",
     1,
     [this](const sensor_msgs::msg::Imu::SharedPtr imu){ this->onImuDataFused(*imu); }
   );
   fc_state_sub_ = this->create_subscription<mavros_msgs::msg::State>(
-    "/mavros/state",
+    "mavros/state",
     10,
     [this](const mavros_msgs::msg::State::SharedPtr st){ this->fcStateCallback(*st); }
   );
   fc_extended_state_sub_ = this->create_subscription<mavros_msgs::msg::ExtendedState>(
-    "/mavros/extended_state",
+    "mavros/extended_state",
     10,
     [this](const mavros_msgs::msg::ExtendedState::SharedPtr est){ this->fcExtendedStateCallback(*est); }
   );
@@ -469,11 +470,7 @@ void DroneCommander::tryControlAuth(bool auth)
 
 bool DroneCommander::needControlByThis()
 {
-  if (param_.is_px4) {
-    return rcRequestVo() || rcRequestOnboard();
-  } else {
-    return rcRequestVo();
-  }
+  return rcRequestVo() || rcRequestOnboard();
 }
 
 bool DroneCommander::checkControlAuth()
@@ -683,10 +680,6 @@ void DroneCommander::processInputSource()
 
 void DroneCommander::processRcInput()
 {
-  if (state_.control_auth != DCMD::CTRL_AUTH_THIS && !param_.is_px4) {
-    state_.commander_ctrl_mode = DCMD::CTRL_MODE_IDLE;
-    return;
-  }
   if (rcMovingStick()) {
     requestCtrlMode(DCMD::CTRL_MODE_POSVEL);
   } else {
@@ -1265,14 +1258,10 @@ void DroneCommander::setAttSetpoint(double roll, double pitch, double yawrate, d
   ctrl_cmd_->att_sp.y = quat_sp.y();
   ctrl_cmd_->att_sp.z = quat_sp.z();
   ctrl_cmd_->z_sp = z;
-  if ((state_.is_armed && state_.control_auth == DCMD::CTRL_AUTH_THIS) || param_.is_px4) {
-    if (z_use_vel) {
-      ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_ATT_VELZ_MODE;
-    } else {
-      ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_ATT_THRUST_MODE;
-    }
+  if (z_use_vel) {
+    ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_ATT_VELZ_MODE;
   } else {
-    ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
+    ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_ATT_THRUST_MODE;
   }
 }
 
@@ -1293,11 +1282,7 @@ void DroneCommander::setPosSetpoint(double x, double y, double z,
   if (!std::isnan(yaw)) {
     ctrl_cmd_->yaw_sp = constrainAngle(yaw);
   }
-  if ((state_.is_armed && state_.control_auth == DCMD::CTRL_AUTH_THIS) || param_.is_px4) {
-    ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_POS_MODE;
-  } else {
-    ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
-  }
+  ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_POS_MODE;
 }
 
 void DroneCommander::setVelSetpoint(double vx, double vy, double vz,
@@ -1313,11 +1298,7 @@ void DroneCommander::setVelSetpoint(double vx, double vy, double vz,
     ctrl_cmd_->yaw_sp = constrainAngle(yaw);
   }
   ctrl_cmd_->use_fc_yaw = false;
-  if ((state_.is_armed && state_.control_auth == DCMD::CTRL_AUTH_THIS) || param_.is_px4) {
-    ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_VEL_MODE;
-  } else {
-    ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_IDLE_MODE;
-  }
+  ctrl_cmd_->ctrl_mode = DPCL::CTRL_CMD_VEL_MODE;
 }
 
 /**

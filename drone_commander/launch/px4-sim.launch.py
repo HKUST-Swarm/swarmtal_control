@@ -14,20 +14,25 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.actions import SetLaunchConfiguration
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, TextSubstitution
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     # 1) Declare launch arguments (similar to ROS1 <arg> tags)
     vo_imu_topic_arg = DeclareLaunchArgument(
+        'drone_id',
+        default_value='1',
+        description='Drone ID'
+    )
+    vo_imu_topic_arg = DeclareLaunchArgument(
         'vo_imu_topic',
-        default_value='/d2vins/imu_propagation',
+        default_value='d2vins/imu_propagation',
         description='Topic for visual odometry IMU propagation'
     )
     vo_topic_arg = DeclareLaunchArgument(
         'vo_topic',
-        default_value='/d2vins/odometry',
+        default_value='d2vins/odometry',
         description='Topic for visual odometry'
     )
     output_arg = DeclareLaunchArgument(
@@ -50,6 +55,9 @@ def generate_launch_description():
         default_value='1',
         description='Drone ID'
     )
+    
+    drone_id = LaunchConfiguration('drone_id')
+    namespace = [TextSubstitution(text='/uav'), drone_id]
 
     # 2) Node: drone_commander
     #    - prefix with "nice --20"
@@ -60,19 +68,14 @@ def generate_launch_description():
         executable='drone_commander_node',
         name='drone_commander',
         output=LaunchConfiguration('output'),
+        namespace=namespace,
         remappings=[
             ('visual_odometry', LaunchConfiguration('vo_imu_topic')),
             ('visual_odometry_image', LaunchConfiguration('vo_topic')),
-            ('flight_status', '/dji_sdk_1/dji_sdk/flight_status'),
-            ('rc', '/mavros/rc/in'),
-            ('battery', '/mavros/battery'),
-            ('fc_imu', '/mavros/imu/data_raw'),
-            ('fc_imu_fused', '/mavros/imu/data'),
-            ('onboard_command', '/drone_commander/onboard_command'),
-            ('/swarm_commander_state', '/drone_commander/swarm_commander_state'),
         ],
         parameters=[
             LaunchConfiguration('config_path'),   # 加载 YAML
+            {'drone_id': drone_id}  # 加载参数
         ],
     )
 
@@ -80,10 +83,11 @@ def generate_launch_description():
         package='drone_commander',
         executable='px4_odom_converter.py',  # 确保脚本可执行 & 已安装
         name='odom_transformer',
+        namespace=namespace,
         output='screen',
         remappings=[
-            ('odom_in', '/mavros/odometry/in'),
-            ('odom_out', '/mavros/odometry/in_correct')
+            ('odom_in', 'mavros/odometry/in'),
+            ('odom_out', 'mavros/odometry/in_correct')
         ]
     )
 
@@ -92,6 +96,7 @@ def generate_launch_description():
         vo_topic_arg,
         output_arg,
         config_path_arg,
+        drone_id_arg,
         drone_commander_node,
         odom_transformer_node
     ])

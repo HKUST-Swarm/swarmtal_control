@@ -104,6 +104,7 @@ public:
    */
   struct DroneCommanderParam
   {
+    int drone_id                   {1};
     double max_loss_rc             {1.0};
     double max_loss_sdk            {1.0};
     double max_odom_velocity       {25.0};
@@ -141,7 +142,6 @@ public:
     double battery_remain_param_a   {345.375};
     double battery_remain_param_b   {-4757.3};
     double landing_thrust           {0.2};
-    bool   is_px4                   {true};
   };
 
 
