@@ -18,7 +18,9 @@ RUN ./install_geographiclib_datasets.sh
 
 RUN   mkdir -p ${SWARM_WS}/src/ && \
       cd ${SWARM_WS}/src/ && \
-      git clone https://github.com/HKUST-Swarm/swarm_msgs.git -b ros2
+      git clone https://github.com/HKUST-Swarm/swarm_msgs.git -b ros2 && \
+      git clone https://github.com/HKUST-Swarm/bspline.git -b ros2
+      
 COPY ./ ${SWARM_WS}/src/
 WORKDIR $SWARM_WS
 SHELL ["/bin/bash", "-c"]
