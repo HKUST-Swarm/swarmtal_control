@@ -10,7 +10,7 @@ ENV VO_IMU_TOPIC=/d2vins/imu_propagation
 ENV DRONE_ID=1
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y git ros-${ROS_VERSION}-mavros ros-${ROS_VERSION}-mavros-extras ros-${ROS_VERSION}-mavros-msgs \
+RUN apt-get update && apt upgrade -y && apt-get install -y git ros-${ROS_VERSION}-mavros ros-${ROS_VERSION}-mavros-extras ros-${ROS_VERSION}-mavros-msgs \
       vim wget screen libglib2.0-dev python3-termcolor python3-matplotlib net-tools
 RUN wget https://raw.githubusercontent.com/mavlink/mavros/ros2/mavros/scripts/install_geographiclib_datasets.sh
 RUN chmod +x install_geographiclib_datasets.sh
