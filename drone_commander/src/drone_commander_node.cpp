@@ -254,51 +254,52 @@ void DroneCommander::initROS2Interfaces()
   control_att_pub_ = this->create_publisher<mavros_msgs::msg::AttitudeTarget>("mavros/setpoint_raw/attitude", 1);
   mavros_system_status_pub_ = this->create_publisher<mavros_msgs::msg::CompanionProcessStatus>("mavros/companion_process/status", 1);
   mavros_odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("mavros/odometry/out", 10);
-
+  auto qos_best_effort = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort();  
+  auto qos_reliable = rclcpp::QoS(rclcpp::KeepLast(1)).reliable();                                                                                               
   // Subscriptions
   vo_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
     "visual_odometry",
-    1,
+    qos_best_effort,
     [this](const nav_msgs::msg::Odometry::SharedPtr msg){ this->voCallback(*msg); }
   );
   vo_sub_slow_ = this->create_subscription<nav_msgs::msg::Odometry>(
     "visual_odometry_image",
-    10,
+    qos_best_effort,
     [this](const nav_msgs::msg::Odometry::SharedPtr msg){ this->voCallbackImage(*msg); }
   );
   onboard_cmd_sub_ = this->create_subscription<OCMD>(
     "drone_commander/onboard_command",
-    10,
+    qos_reliable,
     [this](const OCMD::SharedPtr cmd){ this->onboardCmdCallback(*cmd); }
   );
   rc_mavros_sub_ = this->create_subscription<mavros_msgs::msg::RCIn>(
     "mavros/rc/in",
-    1,
+    qos_reliable,
     [this](const mavros_msgs::msg::RCIn::SharedPtr rc){ this->rcMavrosCallback(*rc); }
   );
   bat_sub_ = this->create_subscription<sensor_msgs::msg::BatteryState>(
     "mavros/battery",
-    1,
+    qos_best_effort,
     [this](const sensor_msgs::msg::BatteryState::SharedPtr bat){ this->batteryCallback(*bat); }
   );
   imu_data_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
     "mavros/imu/data_raw",
-    1,
+    qos_best_effort,
     [this](const sensor_msgs::msg::Imu::SharedPtr imu){ this->onImuData(*imu); }
   );
   imu_fused_data_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
     "mavros/imu/data",
-    1,
+    qos_best_effort,
     [this](const sensor_msgs::msg::Imu::SharedPtr imu){ this->onImuDataFused(*imu); }
   );
   fc_state_sub_ = this->create_subscription<mavros_msgs::msg::State>(
     "mavros/state",
-    10,
+    qos_reliable,
     [this](const mavros_msgs::msg::State::SharedPtr st){ this->fcStateCallback(*st); }
   );
   fc_extended_state_sub_ = this->create_subscription<mavros_msgs::msg::ExtendedState>(
     "mavros/extended_state",
-    10,
+    qos_reliable,
     [this](const mavros_msgs::msg::ExtendedState::SharedPtr est){ this->fcExtendedStateCallback(*est); }
   );
 

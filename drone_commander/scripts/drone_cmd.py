@@ -29,6 +29,7 @@ def main():
     parser.add_argument("-x", "--axis", type=int, help="axis for sweep", default=0)
     parser.add_argument("-A", "--amp", type=float, help="amp for sweep", default=1.0)
     parser.add_argument("-p", "--path", type=str, help="Path for CSV file", default="")
+    parser.add_argument("-d", "--drone", type=int, help="drone id")
     parser.add_argument("params", nargs="*", type=float, help="parameters for command")
 
     args = parser.parse_args()
@@ -41,8 +42,8 @@ def main():
     node.get_logger().info("Initializing drone_cmd (ROS2) node...")
 
     # 创建 Publisher
-    pub = node.create_publisher(DroneOnboardCommand, '/drone_commander/onboard_command', 10)
-    node.get_logger().info("Publisher created on /drone_commander/onboard_command")
+    pub = node.create_publisher(DroneOnboardCommand, f'/uav{args.drone}/drone_commander/onboard_command', 10)
+    node.get_logger().info(f"Publisher created on /uav{args.drone}/drone_commander/onboard_command")
 
     # 等待至少一个订阅者连接
     while rclpy.ok():
