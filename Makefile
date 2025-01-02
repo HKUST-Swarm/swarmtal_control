@@ -1,4 +1,4 @@
-all: arm64; pc
+all: pc arm64
 
 help:
 	@echo ""
@@ -18,11 +18,11 @@ pc:
 clean:
 	@docker rmi -f swarmtal_control_ros2
 
-upload: upload_arm64; upload_amd64
+upload: upload_pc upload_arm64 
 
 upload_arm64: arm64
 	@docker tag swarmtal_control_ros2:arm64 buaadocker.xuhao1.me/swarmtal_control_ros2:arm64
 	@docker push buaadocker.xuhao1.me/swarmtal_control_ros2:arm64
 
-upload_amd64: pc
+upload_pc: pc
 	@docker push buaadocker.xuhao1.me/swarmtal_control_ros2:amd64
