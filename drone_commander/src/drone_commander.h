@@ -221,6 +221,9 @@ private:
   // Timer
   rclcpp::TimerBase::SharedPtr loop_timer_;
 
+  std::shared_ptr<rclcpp::Node> service_blocking_node = nullptr;
+
+
   // ------------------- Internal methods -------------------
   void initStates();
   void declareAllParameters();

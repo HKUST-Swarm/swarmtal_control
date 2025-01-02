@@ -20,8 +20,8 @@ RUN   mkdir -p ${SWARM_WS}/src/ && \
       cd ${SWARM_WS}/src/ && \
       git clone https://github.com/HKUST-Swarm/swarm_msgs.git -b ros2 && \
       git clone https://github.com/HKUST-Swarm/bspline.git -b ros2
-      
-COPY ./ ${SWARM_WS}/src/
+RUN apt install gdb gdbserver -y
+COPY ./ ${SWARM_WS}/src/swarmtal_control
 COPY ./drone_commander/config/drone_commander_config.yaml /drone_commander_config.yaml
 WORKDIR $SWARM_WS
 SHELL ["/bin/bash", "-c"]

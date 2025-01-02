@@ -304,9 +304,11 @@ void DroneCommander::initROS2Interfaces()
   );
 
   // Service clients
-  control_auth_client_   = this->create_client<mavros_msgs::srv::SetMode>("/mavros/set_mode");
-  drone_landing_control_ = this->create_client<mavros_msgs::srv::CommandTOL>("/mavros/cmd/land");
-  arm_client_            = this->create_client<mavros_msgs::srv::CommandBool>("/mavros/cmd/arming");
+  service_blocking_node = std::make_shared<rclcpp::Node>("drone_commander_helper");
+
+  control_auth_client_   = service_blocking_node->create_client<mavros_msgs::srv::SetMode>("mavros/set_mode");
+  drone_landing_control_ = service_blocking_node->create_client<mavros_msgs::srv::CommandTOL>("mavros/cmd/land");
+  arm_client_            = service_blocking_node->create_client<mavros_msgs::srv::CommandBool>("mavros/cmd/arming");
 
   RCLCPP_INFO(this->get_logger(), "DroneCommander: services and topics ready (if found).");
 }
@@ -404,7 +406,7 @@ bool DroneCommander::callArmService(bool arm)
   auto future = arm_client_->async_send_request(req);
 
   // Spin until we get the result
-  auto ret = rclcpp::spin_until_future_complete(this->get_node_base_interface(), future);
+  auto ret = rclcpp::spin_until_future_complete(service_blocking_node->get_node_base_interface(), future);
   if (ret == rclcpp::FutureReturnCode::SUCCESS) {
     bool ok = future.get()->success;
     RCLCPP_INFO(this->get_logger(), "Try arm=%d success=%d", arm, ok);
@@ -460,7 +462,7 @@ void DroneCommander::tryControlAuth(bool auth)
     req->custom_mode = "ALTCTL";
   }
   auto future = control_auth_client_->async_send_request(req);
-  auto ret = rclcpp::spin_until_future_complete(this->get_node_base_interface(), future);
+  auto ret = rclcpp::spin_until_future_complete(service_blocking_node->get_node_base_interface(), future);
   if (ret == rclcpp::FutureReturnCode::SUCCESS) {
     bool result_ok = future.get()->mode_sent;
     if (!result_ok) {
