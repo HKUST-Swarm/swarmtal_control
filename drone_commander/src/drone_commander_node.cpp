@@ -247,15 +247,16 @@ void DroneCommander::getAllParameters()
 
 void DroneCommander::initROS2Interfaces()
 {
-  // Publishers
-  commander_state_pub_ = this->create_publisher<DCMD>("/swarm_commander_state", 1);
-  ctrl_cmd_pub_ = this->create_publisher<DPCL>("drone_position_control/drone_pos_cmd", 1);
-  control_pos_vel_px4_pub_ = this->create_publisher<mavros_msgs::msg::PositionTarget>("mavros/setpoint_raw/local", 1);
-  control_att_pub_ = this->create_publisher<mavros_msgs::msg::AttitudeTarget>("mavros/setpoint_raw/attitude", 1);
-  mavros_system_status_pub_ = this->create_publisher<mavros_msgs::msg::CompanionProcessStatus>("mavros/companion_process/status", 1);
-  mavros_odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("mavros/odometry/out", 10);
   auto qos_best_effort = rclcpp::QoS(rclcpp::KeepLast(1)).best_effort();  
   auto qos_reliable = rclcpp::QoS(rclcpp::KeepLast(1)).reliable();                                                                                               
+  
+  // Publishers
+  commander_state_pub_ = this->create_publisher<DCMD>("/swarm_commander_state", qos_reliable);
+  ctrl_cmd_pub_ = this->create_publisher<DPCL>("drone_position_control/drone_pos_cmd", qos_best_effort);
+  control_pos_vel_px4_pub_ = this->create_publisher<mavros_msgs::msg::PositionTarget>("mavros/setpoint_raw/local", qos_best_effort);
+  control_att_pub_ = this->create_publisher<mavros_msgs::msg::AttitudeTarget>("mavros/setpoint_raw/attitude", qos_best_effort);
+  mavros_system_status_pub_ = this->create_publisher<mavros_msgs::msg::CompanionProcessStatus>("mavros/companion_process/status", qos_reliable);
+  mavros_odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>("mavros/odometry/out", 10);
   // Subscriptions
   vo_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
     "visual_odometry",
